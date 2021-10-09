@@ -7,8 +7,7 @@ import matplotlib.pyplot as plt
 plt.ioff()
 from openquake.hazardlib.geo.nodalplane import NodalPlane
 from openquake.hazardlib.pmf import PMF
-from pyrisk.utils.map_earthquakes import MapEarthquakes
-from pyrisk.etas.simulation_functions import *
+from pysimulator.simulation_functions import *
 
 
 
@@ -354,8 +353,13 @@ def get_cumnum_vs_time(simulation, mag_threshold, max_time=None):
     mags = [rup.mag for rup in simulation.catalog["rupture"]]
     filt = np.array(mags) >= mag_threshold
     bla = simulation.filter(filt)
+    if bla.get_num_events() <= 1:
+        return {"num_events": [0], "time_vec": np.array([0.])}
     bla.process_catalog_4etas(mag_threshold,
                               sim_start=bla.catalog["datetime"][0])
+    if bla.get_num_events() <= 1:
+        return {"num_events": [0], "time_vec": np.array([0.])}
+
     times = bla.catalog["tt"]
     if max_time is None:
         time_vec = np.arange(0., np.ceil(np.max(times)), 0.1)
@@ -373,6 +377,8 @@ def get_cumnum_matrix_vs_time(simulations, mag_threshold, max_time=None):
         res_list.append(get_cumnum_vs_time(simulations[l], mag_threshold))
     if max_time is None:
         maxt = np.ceil(max([res["time_vec"][-1] for res in res_list]))
+        for l, res in enumerate(res_list):
+            res["time_vec"][-1]
     else:
         maxt = max_time
     time_vec = np.arange(0., maxt, 0.1)

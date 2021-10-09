@@ -6,8 +6,8 @@
 import numpy as np
 import pandas as pd
 from openquake.hazardlib.geo.mesh import RectangularMesh
-from pyrisk.etas.etas8p.catalog import CatalogueEtas
-from pyrisk.etas.utils import longlat2xy
+from pyetas.etas8p.catalog import CatalogueEtas
+from pyetas.utils import longlat2xy
 
 
 class CustomCatalog():
@@ -47,7 +47,7 @@ class CustomCatalog():
             #         y_par.append(np.mean(ys[ic:ic+2, ir:ir+2]))
             #         dep.append(np.mean(zs[ic:ic+2, ir:ir+2]))
             # # check
-            # from pyrisk.utils.plot_rup_simple import PlotRup
+            # from pyutils.plot_rup_simple import PlotRup
             # pr = PlotRup()
             # pr.plot_mesh(mesh, s=1)
             # pr.plot_xyz(x_par, y_par, dep, s=2)
@@ -256,7 +256,7 @@ class CustomCatalog():
     
     
     def simple_plot3d(self):
-        from pyrisk.utils.plot3d_rup_simple import PlotRup
+        from pyutils.plot3d_rup_simple import PlotRup
         pr = PlotRup()
         for e in range(0, self.get_num_events()):
             pr.plot_xyz(self.catalog["rupture"][e].hypocenter.longitude,
@@ -280,7 +280,7 @@ class CustomCatalog():
 
 
     def simple_plot2d(self):
-        from pyrisk.utils.plot2d_rup_simple import PlotRup
+        from pyutils.plot2d_rup_simple import PlotRup
         pr = PlotRup()
         for e in range(0, self.get_num_events()):
             pr.plot_xyz(self.catalog["rupture"][e].hypocenter.longitude,

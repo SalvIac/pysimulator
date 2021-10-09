@@ -17,8 +17,8 @@ from openquake.hazardlib.geo.line import Line
 from openquake.hazardlib.scalerel import PointMSR
 from openquake.hazardlib.geo.nodalplane import NodalPlane
 
-from pyrisk.simulator.build_rupture_plane import get_rupture_surface
-from pyrisk.simulator.build_point_plane import get_point_surface
+from pysimulator.build_rupture_plane import get_rupture_surface
+from pysimulator.build_point_plane import get_point_surface
 
 '''
 RuptureBuilder can build a rupture (ParametricProbabilisticRupture in OQ) with
@@ -133,7 +133,7 @@ class RuptureBuilder():
         lat = lats[ind]
         depth = depths[ind]
         # # check
-        # from pyrisk.utils.plot_rup_simple import PlotRup
+        # from pyutils.plot_rup_simple import PlotRup
         # pr = PlotRup()
         # pr.plot_mesh(surface.mesh, s=1)
         # pr.plot_xyz(lon, lat, depth, marker="*", s=200)
@@ -163,7 +163,7 @@ class RuptureBuilder():
         else:
             newsurf = newsurfs[0]
         # # check
-        # from pyrisk.utils.plot_rup_simple import PlotRup
+        # from pyutils.plot_rup_simple import PlotRup
         # pr = PlotRup()
         # for surf in surface.surfaces:
         #     pr.plot_mesh(surf.mesh, s=1, c="b")
