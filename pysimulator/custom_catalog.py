@@ -3,6 +3,7 @@
 @author: Salvatore
 """
 
+import datetime
 import numpy as np
 import pandas as pd
 from openquake.hazardlib.geo.mesh import RectangularMesh
@@ -145,6 +146,7 @@ class CustomCatalog():
             self.catalog['mm'] = np.array([])
             self.catalog['geom'] = list()
             self.catalog['isspontaneous'] = list()
+            self.catalog['main_mag_ref'] = list()
         else:
             # preprocess input catalog (relative time, magnitude and distance)
             # convert fault geometry (where available)
@@ -167,6 +169,12 @@ class CustomCatalog():
                     geom[i] = {'x': proj['x'],
                                'y': proj['y'],
                                'depth': geometry["depths"]}
+            # # handle duplicates in time (important for chronologic order)
+            # for i, dt1 in enumerate(self.catalog['datetime']):
+            #     for j in range(i+1, len(self.catalog['datetime'])):
+            #         if dt1 == self.catalog['datetime'][j]:
+            #             print(i,j)
+            #             self.catalog['datetime'][j] += datetime.timedelta(microseconds=1)
             self.catalog['tt'] = CatalogueEtas.date2day(
                                                pd.Series(self.catalog['datetime']),
                                                sim_start).to_numpy()
@@ -179,13 +187,13 @@ class CustomCatalog():
             self.catalog['mm'] = np.array(self.catalog['magnitude'])-mag_threshold
             self.catalog["geom"] = geom
             # isspontaneous -> mainshock
-            # par_main_mag -> if not spontaneous, then this is the magnitude of the parent mainshock
+            # main_mag_ref -> if not spontaneous, then this is the magnitude of the parent mainshock
             if "mainshock" in self.catalog.keys():
                 self.catalog['isspontaneous'] = self.catalog['mainshock']
-                self.catalog['par_main_mag'] = [None]*self.catalog['mm'].shape[0] #TODO this should point to the parent
+                self.catalog['main_mag_ref'] = [None]*self.catalog['mm'].shape[0] #TODO this should point to the parent
             else: # assumption all events in catalog are mainshocks
                 self.catalog['isspontaneous'] = [True]*self.catalog['mm'].shape[0]
-                self.catalog['par_main_mag'] = [None]*self.catalog['mm'].shape[0]
+                self.catalog['main_mag_ref'] = [None]*self.catalog['mm'].shape[0]
             # geometries.append(cls.rup2geom(rupture))
             #     ge = {"lons": list(), "lats": list(), "depths": list()}
             #     for ru in rupture_list[ind].ruptureList[0].ruptureSurface.surfaces:

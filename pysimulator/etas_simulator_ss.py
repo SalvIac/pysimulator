@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Module :mod:`pyrisk.simulator.etas_simulator` defines
+Module :mod:`pyrisk.simulator.etas_smulator` defines
 :class:`EtasSimulator`.
+
+this is no longer up-to-date. it's based on pandas dataframes, which are very
+slow. the newer version of this code works with numpy arrays and lists
 """
 
 import os
 import datetime
 import warnings
-from copy import copy, deepcopy
-from itertools import compress
+from copy import deepcopy
 
 import numpy as np
 import pandas as pd
@@ -33,87 +35,6 @@ from pysimulator.simulation_functions import (inv_cdf_magnitude_trunc,
 from pysimulator.custom_catalog import CustomCatalog
 from pysimulator.rupture_builder import RuptureBuilder
 from myutils.run_multiprocess import run_multiprocess
-
-
-
-
-def concat(dict1, dict2, keys=None):
-    '''
-    append dict2 to dict1 (faster than pd.concat for two dicts)
-    '''
-    if keys is None:
-        dict1 = copy(dict1) # avoid reference
-    else:
-        dict1 = {key: dict1[key] for key in keys}
-    keys2 = list(dict2.keys())
-    if len(keys2) == 0:
-        return dict1
-    keys1 = list(dict1.keys())
-    for key in keys1:
-        if key in keys2:
-            temp = dict2[key]
-        else:
-            temp = [None]*len(dict2[keys2[0]])
-        if isinstance(dict1[key], list):
-            newlist = copy(dict1[key]) # avoid reference
-            for val in temp:
-                newlist.append(val)
-            dict1[key] = newlist
-        elif isinstance(dict1[key], np.ndarray):
-            newlist = dict1[key].tolist()
-            for val in temp:
-                newlist.append(val)
-            dict1[key] = np.array(newlist)
-        else:
-            raise Exception("wrong datatype in dict1, it must be list or np.ndarray")
-    # # check
-    # alllen = list()
-    # for key in dict1.keys():
-    #     alllen.append( len(dict1[key]) )
-    return dict1
-
-
-
-def concat_list(dicts, keys=None):
-    dict1 = dicts[0]
-    for dict2 in dicts[1:]:
-        dict1 = concat(dict1, dict2, keys)
-    return dict1
-
-
-
-def filter_dict(dict1, filt):
-    '''
-    ind: bool array
-    '''
-    dict2 = copy(dict1) # avoid reference
-    for key in dict2.keys():
-        if isinstance(dict2[key], list):
-            newlist = list(compress(dict2[key], filt))
-            dict2[key] = newlist
-        elif isinstance(dict2[key], np.ndarray):
-            newlist = dict2[key][filt]
-            dict2[key] = np.array(newlist)
-        else:
-            raise Exception("wrong datatype in dict1, it must be list or np.ndarray")
-    return dict2
-
-
-
-def sort_by(dict1, bykey):
-    dict2 = copy(dict1) # avoid reference
-    inds = np.argsort(dict2[bykey])
-    for key in dict2.keys():
-        if isinstance(dict2[key], list):
-            newlist = list()
-            for i in inds:
-                newlist.append(dict2[key][i])
-            dict2[key] = newlist
-        elif isinstance(dict2[key], np.ndarray):
-            dict2[key] = dict2[key][inds]
-        else:
-            raise Exception("wrong datatype in dict1, it must be list or np.ndarray")
-    return dict2
 
 
 
@@ -266,10 +187,12 @@ class EtasSimulator():
             self.params["incompl_min_mag"] = 6.
             warnings.warn("default incompl_min_mag value used for incompleteness model (incompl_min_mag=6)")
 
+    
 
 
 
 
+    
     @classmethod
     def _model2dict(cls, model):
         modeldict = {"timetrunc": True,
@@ -326,69 +249,33 @@ class EtasSimulator():
         # self.__dict__.update((k, v) for k, v in self.simul_options.items() 
         #                      if k in self.allowed_keys)
         print("define inputs for etas")
-
-        # in single_event mode, we have one single input_catalog, to be used 
-        # several times to generate aftershocks
-        if self.mode == "single_event":
-            cat = self.input_catalog[0]
+        inds = self.slice2inds()
+        for i, ind in tqdm(inds):
+            cat = self.input_catalog[i]
             if len(cat.catalog["datetime"]) != 0:
                 cat.process_catalog_4etas(self.params["min_mag"])
-            _gen0 = cat.catalog
+            _gen0 = cat.get_df()
             if not self.fault_mode:
-                _gen0["geom"] = [None]*cat.get_num_events()
-        
+                _gen0["geom"] = None
+            
             filters = deepcopy(self.filters)
             if (filters["sim_start"] is not None) and \
                (filters["sim_end"] is not None) and \
                len(cat.catalog['datetime']) != 0:
-                tdt = cat.datetime2tdt(filters["sim_start"],
-                                       filters["sim_end"],
-                                       pd.Series(cat.catalog['datetime']).min())
+                tdt = cat.datetime2tdt(
+                    filters["sim_start"], filters["sim_end"],
+                    pd.Series(cat.catalog['datetime']).min())
                 filters["t_start"] = tdt[0]
                 filters["t_end"] = tdt[1]
             
-            background = None
-            if self.simul_options['background'] is not None:
-                background = EtasSimulator.integrate_background_gridded(
-                                    self.simul_options['background'], _gen0,
-                                    self.params, filters)
-                print("background integral:", background["integ0"], "events")
-        
-        inds = self.slice2inds()
-        for i, ind in tqdm(inds):
-            # in stoch_catalog mode, we have different input_catalogs
-            if self.mode == "stoch_catalog":
-                cat = self.input_catalog[i]
-                if len(cat.catalog["datetime"]) != 0:
-                    cat.process_catalog_4etas(self.params["min_mag"])
-                _gen0 = cat.catalog
-                if not self.fault_mode:
-                    _gen0["geom"] = [None]*cat.get_num_events()
-            
-                filters = deepcopy(self.filters)
-                if (filters["sim_start"] is not None) and \
-                   (filters["sim_end"] is not None) and \
-                   len(cat.catalog['datetime']) != 0:
-                    tdt = cat.datetime2tdt(filters["sim_start"],
-                                           filters["sim_end"],
-                                           pd.Series(cat.catalog['datetime']).min())
-                    filters["t_start"] = tdt[0]
-                    filters["t_end"] = tdt[1]
-                
-                background = None
-                if self.simul_options['background'] is not None:
-                    background = EtasSimulator.integrate_background_gridded(
-                                        self.simul_options['background'], _gen0,
-                                        self.params, filters)
-                    print("background integral:", background["integ0"], "events")
-
-            dic = {'gen0': deepcopy(_gen0),
+            dic = {'gen0': _gen0.copy(), #TODO use dict of numpy arrays (pandas is slow)
                    'params': self.params,
                    'model': self.model,
                    'only_first_generation': self.simul_options['only_first_generation'],
-                   'background': background,
+                   'background': self.simul_options['background'],
                    'seed': self.seed*(ind+1),
-                   'filters': filters}
+                   'filters': filters,
+                   }
             self.inputs[ind] = dic
         
     
@@ -403,68 +290,33 @@ class EtasSimulator():
             print("simulate etas model")
             out = run_multiprocess(self.simulate_multi, self.inputs[sl],
                                    self.cores)
-        else: #TODO I don't like that I had to copy-paste code from above here to save RAM
+        else:
             print("simulate etas model")
-            
-            if self.mode == "single_event":
-                cat = self.input_catalog[0]
-                if len(cat.catalog["datetime"]) != 0:
-                    cat.process_catalog_4etas(self.params["min_mag"])
-                _gen0 = cat.catalog
-                if not self.fault_mode:
-                    _gen0["geom"] = [None]*cat.get_num_events()
-            
-                filters = deepcopy(self.filters)
-                if (filters["sim_start"] is not None) and \
-                   (filters["sim_end"] is not None) and \
-                   len(cat.catalog['datetime']) != 0:
-                    tdt = cat.datetime2tdt(filters["sim_start"],
-                                           filters["sim_end"],
-                                           pd.Series(cat.catalog['datetime']).min())
-                    filters["t_start"] = tdt[0]
-                    filters["t_end"] = tdt[1]
-                
-                background = None
-                if self.simul_options['background'] is not None:
-                    background = EtasSimulator.integrate_background_gridded(
-                                        self.simul_options['background'], _gen0,
-                                        self.params, filters)
-                    print("background integral:", background["integ0"], "events")
-            
             out = list()
             inds = self.slice2inds()
             for i, ind in tqdm(inds):
-                # in stoch_catalog mode, we have different input_catalogs
-                if self.mode == "stoch_catalog":
-                    cat = self.input_catalog[i]
-                    if len(cat.catalog["datetime"]) != 0:
-                        cat.process_catalog_4etas(self.params["min_mag"])
-                    _gen0 = cat.catalog
-                    if not self.fault_mode:
-                        _gen0["geom"] = [None]*cat.get_num_events()
+                cat = self.input_catalog[i]
+                if len(cat.catalog["datetime"]) != 0:
+                    cat.process_catalog_4etas(self.params["min_mag"])
+                _gen0 = cat.get_df()
+                if not self.fault_mode:
+                    _gen0["geom"] = None
                 
-                    filters = deepcopy(self.filters)
-                    if (filters["sim_start"] is not None) and \
-                       (filters["sim_end"] is not None) and \
-                       len(cat.catalog['datetime']) != 0:
-                        tdt = cat.datetime2tdt(filters["sim_start"],
-                                               filters["sim_end"],
-                                               pd.Series(cat.catalog['datetime']).min())
-                        filters["t_start"] = tdt[0]
-                        filters["t_end"] = tdt[1]
-                    
-                    background = None
-                    if self.simul_options['background'] is not None:
-                        background = EtasSimulator.integrate_background_gridded(
-                                            self.simul_options['background'], _gen0,
-                                            self.params, filters)
-                        print("background integral:", background["integ0"], "events")
-                    
-                dic = {'gen0': deepcopy(_gen0),
+                filters = deepcopy(self.filters)
+                if (filters["sim_start"] is not None) and \
+                    (filters["sim_end"] is not None) and \
+                    len(cat.catalog['datetime']) != 0:
+                    tdt = cat.datetime2tdt(
+                        filters["sim_start"], filters["sim_end"],
+                        pd.Series(cat.catalog['datetime']).min())
+                    filters["t_start"] = tdt[0]
+                    filters["t_end"] = tdt[1]
+                
+                dic = {'gen0': _gen0.copy(), #TODO use dict of numpy arrays (pandas is slow)
                        'params': self.params,
                        'model': self.model,
                        'only_first_generation': self.simul_options['only_first_generation'],
-                       'background': background,
+                       'background': self.simul_options['background'],
                        'seed': self.seed*(ind+1),
                        'filters': filters}
                 self.inputs[ind] = {'seed': self.seed*(ind+1)}
@@ -484,8 +336,8 @@ class EtasSimulator():
         for j, o in enumerate(out):
             seed = inputs[j]['seed']
             np.random.seed(seed=seed*2)
-            depth = self.get_depth(o["tt"].shape[0])
-            nodpl = self.get_nodalplane(o["tt"].shape[0])
+            depth = self.get_depth(o.shape[0])
+            nodpl = self.get_nodalplane(o.shape[0])
             inps.append([o, depth, nodpl])
         print("post-processing")
         if self.multiprocessing:
@@ -506,21 +358,22 @@ class EtasSimulator():
         nodpl = inputs[2]
         date_times = list()
         ruptures = list()
-        for i in range(0, o["tt"].shape[0]):
-            date_times.append(o["datetime"][i])
-            if (not o["isspontaneous"][i]) or (o["isspontaneous"][i] == "bkg"):
+        for i in range(0, o.shape[0]):
+            date_times.append(o["datetime"].iloc[i])
+            if not o["isspontaneous"].iloc[i] or \
+               o["isspontaneous"].iloc[i] == "bkg":
                 ruptures.append( RuptureBuilder.init_point(
-                                                o["magnitude"][i],
-                                                o["longitude"][i],
-                                                o["latitude"][i],
+                                                o["magnitude"].iloc[i],
+                                                o["longitude"].iloc[i],
+                                                o["latitude"].iloc[i],
                                                 depth[i],
                                                 nodpl[i].rake,
                                                 nodpl[i].strike,
                                                 nodpl[i].dip) )
             else:
-                ruptures.append( o["rupture"][i] )
+                ruptures.append( o["rupture"].iloc[i] )
         return CustomCatalog(date_times, ruptures,
-                             mainshock=o["isspontaneous"])
+                             mainshock=o["isspontaneous"].to_list())
         
     
     
@@ -536,6 +389,17 @@ class EtasSimulator():
     def set_seed(self, seed):
         self.seed = seed
 
+        
+    # def _lonlat2xy(self, lons, lats):
+    #     proj = CatalogueEtas.longlat2xy(long=np.array(lons),
+    #                                     lat=np.array(lats),
+    #                                     region_poly=self.fit.catalog.region_poly,
+    #                                     dist_unit=self.fit.catalog.dist_unit)
+    #     coords = [(x, y) for x,y in zip(proj['x'], proj['y'])]
+    #     region_win = Polygon(coords)       
+    #     return region_win
+ 
+    
         
     def __str__(self):
         string = "<EtasSimulator"+" \n"\
@@ -559,6 +423,7 @@ class EtasSimulator():
         gen0 = inputs['gen0']
         params = inputs['params']
         model = inputs['model']
+        mag_threshold = params['min_mag']
         only_first_generation = inputs['only_first_generation']
         background = inputs['background']
         seed = inputs['seed']
@@ -568,47 +433,66 @@ class EtasSimulator():
         np.random.seed(seed=seed)
         
         if background is not None:
-            if background["bkg1"]["type"] == "gridded":
-                bkgr = EtasSimulator.get_background_gridded(background, params,
-                                                            filters)
-            elif background["bkg1"]["type"] == "zhuang":
-                raise Exception("get_background_zhuang not yet complete.")
+            if background["type"] == "gridded":
+                bkgr = EtasSimulator.get_background_gridded(background, gen0,
+                                                            params, filters)
+            elif background["type"] == "zhuang":
                 bkgr = EtasSimulator.get_background_zhuang(fit, t, tdt, buffer_region_xy)
-            gen01 = concat(gen0, bkgr)
+            gen1 = pd.concat([gen0, bkgr], ignore_index=True)
         else:
-            gen01 = gen0
+            gen1 = gen0
         
-        if gen01["tt"].shape[0] == 0:
-            return gen01
-        gg = [gen01] # list with each generation, regardless the parent event
+        if gen1.shape[0] == 0:
+            return gen1
+        gg = [gen1] # list with each generation, regardless the parent event
         
         timedep_mc = None
         if model["incompletess"]:
+            # timedep_mc = EtasSimulator.calc_timedep_mc(params, gg[-1], gg[-1],
+            #                                            mag_threshold, 5)
             timedep_mc = EtasSimulator.calc_timedep_mc(params,
-                                                       # gg[-1].index,
-                                                       gg[-1]["tt"],
-                                                       gg[-1]["tt"],
-                                                       gg[-1]["magnitude"])
+                                                        gg[-1].index,
+                                                        gg[-1]["tt"].values,
+                                                        gg[-1]["tt"].values,
+                                                        gg[-1]["magnitude"].values,
+                                                        mag_threshold)
         gl = EtasSimulator.get_following_generation(gg[-1], params, model,
                                                     timedep_mc, filters)
         if len(gl) != 0:
-            gg.append(concat_list(gl))
+            gg.append(pd.concat(gl, ignore_index=True))
         
         if not only_first_generation:
             l = 1
             while len(gl) != 0:
                 if model["incompletess"]:
-                    temp = concat_list(gg, ["tt", "magnitude"])
+                    # timedep_mc = EtasSimulator.calc_timedep_mc(params, gg[-1],
+                    #                              pd.concat(gg, ignore_index=True),
+                    #                              mag_threshold, 0)
                     timedep_mc = EtasSimulator.calc_timedep_mc(params,
-                                                               gg[-1]["tt"],
-                                                               temp["tt"],
-                                                               temp["magnitude"])
+                                                                gg[-1].index,
+                                                                gg[-1]["tt"].values,
+                                                  pd.concat(gg, ignore_index=True)["tt"].values,
+                                                  pd.concat(gg, ignore_index=True)["magnitude"].values,
+                                                  mag_threshold)
+                    
                 gl = EtasSimulator.get_following_generation(gg[-1], params, model,
                                                             timedep_mc, filters)
                 if len(gl) != 0:
-                    gg.append(concat_list(gl))
+                    gg.append(pd.concat(gl, ignore_index=True))
                     l += 1
-        stoch_catalog = concat_list(gg)
+    
+        stoch_catalog = pd.concat(gg, ignore_index=True)
+        stoch_catalog.drop_duplicates(subset=['tt', 'xx', 'yy', 'mm'], inplace=True)
+        stoch_catalog.sort_values(by=['tt'], inplace=True)
+        
+        # filter magnitude
+        stoch_catalog = EtasSimulator.filter_events_mag(stoch_catalog,
+                                                        filters["min_mag"])
+        
+        # convert tt (days) in datetime (no need to filter here)
+        stoch_catalog["datetime"] = stoch_catalog["datetime"].iloc[0] - \
+                                    datetime.timedelta(days=stoch_catalog["tt"].iloc[0]) + \
+                                    np.array([datetime.timedelta(days=days) for days in stoch_catalog["tt"]])
         
         # convert x y in lon lat
         proj = xy2longlat(stoch_catalog['xx'],
@@ -617,33 +501,42 @@ class EtasSimulator():
                           np.mean(gen0['latitude']),
                           dist_unit="degree")
         stoch_catalog['longitude'] = proj['long']
-        stoch_catalog['latitude'] = proj['lat']
+        stoch_catalog['latitude'] = proj['lat']    
         
-        # convert in pandas dataframe only for duplicate removal
-        stcat_df = pd.DataFrame(stoch_catalog)
-        filt = ~stcat_df.duplicated(subset=['tt', 'xx', 'yy', 'mm']).values
-        stoch_catalog = filter_dict(stoch_catalog, filt)
-        
-        # sort by time
-        stoch_catalog = sort_by(stoch_catalog, 'tt')
-        # convert tt (days) in datetime (no need to filter here)
-        stoch_catalog["datetime"] = stoch_catalog["datetime"][0] - \
-                                    datetime.timedelta(days=stoch_catalog["tt"][0]) + \
-                                    np.array([datetime.timedelta(days=days) for days in stoch_catalog["tt"]])
-
-        # filter magnitude
-        stoch_catalog = EtasSimulator.filter_events_mag(stoch_catalog,
-                                                        filters["min_mag"])
-        # filters time (no need to do it here anymore, moved within the loop)
+        # filters time
         stoch_catalog = EtasSimulator.filter_events_time(stoch_catalog,
                                                          filters["t_start"],
                                                          filters["t_end"])
         # filter space
         stoch_catalog = EtasSimulator.filter_events_space(stoch_catalog,
                                                           filters["region"])
+
+
+        stoch_catalog.reset_index(inplace=True, drop=True)
         return stoch_catalog
+    
+    
+        # filter
+        # stoch_catalog = EtasSimulator.filter_events(stoch_catalog, t, tdt, simulation_region_xy, mag_threshold)
 
-
+        # if save_mode: # save catalog
+        #     stoch_catalog.to_csv(path+'\stoch_catalog_'+str(it).zfill(5)+'.csv')
+        #     return it
+        # else:
+            
+        # # simulation and buffer region
+        # self.simulation_region = simulaton_region
+        # self.simulation_region_xy = self._lonlat2xy(simulaton_region['lon'],
+        #                                             simulaton_region['lat'])
+        # if buffer_region is None:
+        #     self.buffer_region = simulaton_region
+        # else:
+        #     self.buffer_region = buffer_region
+        # self.buffer_region_xy = self._lonlat2xy(self.buffer_region['lon'],
+        #                                         self.buffer_region['lat'])
+        # o = EtasSimulator.filter_events(o, t_start, t_end, buffer_region_xy, mag_threshold)
+        
+        
 
     @staticmethod
     def get_following_generation(gen, params, model, timedep_mc, filters):
@@ -674,20 +567,20 @@ class EtasSimulator():
         t_end = filters["t_end"]
         
         # account for full fault geometry
-        mag_par = list()
+        mag_parent = list()
         mag4spat = list()
-        time_par = list()
+        time_parent = list()
         x_par = list()
         y_par = list()
         points = list()
         timedep_mc_par = list()
-        main_mag_ref = list()
+        par_main_mag = list()
         wc = WC1994()
-        for par, geom in enumerate(gen['geom']):
+        for par, geom in gen['geom'].items():
             if geom is None:
-                mag_par.append(gen['magnitude'][par])
+                mag_parent.append(gen['magnitude'][par])
                 mag4spat.append(gen['magnitude'][par])
-                time_par.append(gen['tt'][par])
+                time_parent.append(gen['tt'][par])
                 x_par.append(gen['xx'][par])
                 y_par.append(gen['yy'][par])
                 points.append(1)
@@ -695,11 +588,11 @@ class EtasSimulator():
                     timedep_mc_par.append(timedep_mc[par])
                 else:
                     timedep_mc_par.append(None)
-                main_mag_ref.append(gen["main_mag_ref"][par])
+                par_main_mag.append(gen["par_main_mag"][par])
             else:
                 for i in range(0, geom['x'].shape[0]):
-                    mag_par.append(gen['magnitude'][par])
-                    time_par.append(gen['tt'][par])
+                    mag_parent.append(gen['magnitude'][par])
+                    time_parent.append(gen['tt'][par])
                     x_par.append(geom['x'][i])
                     y_par.append(geom['y'][i])
                     points.append(geom['x'].shape[0])
@@ -707,36 +600,51 @@ class EtasSimulator():
                         timedep_mc_par.append(timedep_mc[par])
                     else:
                         timedep_mc_par.append(None)
-                    # mag4spat.append(mag_par[-1])
+                    # mag4spat.append(mag_parent[-1])
                     mag4spat.append( np.max([ mag_threshold,
-                                       wc.get_median_mag(wc.get_median_area(mag_par[-1], None)/points[-1], None) ]))
-                    main_mag_ref.append(gen["main_mag_ref"][par])
+                                       wc.get_median_mag(wc.get_median_area(mag_parent[-1], None)/points[-1], None) ]))
+                    par_main_mag.append(gen["par_main_mag"][par])
                     
-        # productivity (corrected by the number of points UCERF3)
+        # # productivity (corrected by the number of points UCERF3)
+        # km = (params["A"] / np.array(points)) * np.exp(params["alpha"] * \
+        #                                                (np.array(mag_parent)-mag_threshold))
         if timedep_mc is None:
             km = (params["A"] / np.array(points)) * np.exp(params["alpha"] * \
-                                              (np.array(mag_par)-mag_threshold))
+                                              (np.array(mag_parent)-mag_threshold))
         else:
             km = (params["A"] / np.array(points)) * np.exp(params["alpha"] * \
-                                              (np.array(mag_par)-np.array(timedep_mc_par)))
-
+                                              (np.array(mag_parent)-np.array(timedep_mc_par)))
+    
+        # km[np.array(mag_parent) <= 5.49] = 0. 
+        # this assumes that the mainshock occurs at zero (time_parent)
+        # mag_main = model["magnitude"]["mag_main"]
+        # ind = np.array(time_parent) > 0.
+        # mc = np.clip(mag_main-4.5-0.75*np.log10(np.array(time_parent)[ind]),
+        #              mag_threshold, np.array(mag_parent)[ind])
+        # km[ind] = (params["A"] / np.array(points)[ind]) * \
+        #                 np.exp(params["alpha"] * (np.array(mag_parent)[ind]-mc))
+        
         # random number of offspring events
         ni = poisson.rvs(km)
         if isinstance(ni, int):
             ni = np.array([ni])
     
-        ol = list() # list of offspring for each event of the generation l
+        ol = list() # list of offsprings for each event of the generation l
         for par in range(0, ni.shape[0]):
             if ni[par] > 0:
-                o = EtasSimulator.generate_offspring(params, model, ni[par],
-                                                     time_par[par],
-                                                     x_par[par], y_par[par],
-                                                     mag_par[par],
-                                                     mag4spat[par],
-                                                     main_mag_ref[par])
+                o = EtasSimulator.generate_offsprings(params, model, ni[par],
+                                                      time_parent[par],
+                                                      x_par[par], y_par[par],
+                                                      mag_parent[par],
+                                                      mag4spat[par],
+                                                      par_main_mag[par])
+                                        # timedep_mc_par[par])
                 # preliminary filtering in time avoids unnecessary computational burden
                 o = EtasSimulator.filter_events_time(o, t_start, t_end)
+                # o.sort_values(by=['tt'], inplace=True)
+                # o.reset_index(inplace=True, drop=True)
                 ol.append(o)
+    
         return ol
     
     
@@ -744,62 +652,39 @@ class EtasSimulator():
     @staticmethod
     def filter_events_space(o, region=None):
         if region is not None:
-            filt = np.array([Point(xxx, yyy).within(region) for xxx, yyy 
-                             in zip(o['longitude'], o['latitude'])])
-            o = filter_dict(o, filt)
+            o = o[ np.array([Point(xxx, yyy).within(region) for xxx, yyy 
+                             in zip(o['longitude'], o['latitude'])]) ]
         return o
     
     
     @staticmethod
     def filter_events_mag(o, mag_min=None):
         if mag_min is not None:
-            filt = o['magnitude'] >= mag_min
-            o = filter_dict(o, filt)
+            o = o[ o['magnitude'] >= mag_min ]
         return o
     
     
     @staticmethod
     def filter_events_time(o, t_start=None, t_end=None):
         if (t_start is not None) and (t_end is not None):
-            filt = (o['tt'] >= t_start) & (o['tt'] <= t_end)
-            o = filter_dict(o, filt)
-        else:
-            if (t_start is not None):
-                filt = (o['tt'] >= t_start)
-                o = filter_dict(o, filt)
-            elif (t_end is not None):
-                filt = (o['tt'] <= t_end)
-                o = filter_dict(o, filt)
+            o = o[ (o['tt'] >= t_start) & (o['tt'] <= t_end) ]
+        if (t_start is not None):
+            o = o[ (o['tt'] >= t_start) ]
+        if (t_end is not None):
+            o = o[ (o['tt'] <= t_end) ]
         return o
     
     
     
     @staticmethod
-    def generate_offspring(params, model, num_offspr, time_par, x_par, y_par,
-                           mag_par, mag4spat, main_mag_ref=None):
-        '''
-        given one parent event, generate offspring
-        params: parameters of ETAS, dict
-        model: ETAS model specs, dict
-        num_offspr: number of offspring, int
-        time_par: time parent, float
-        x_par: x parent, float
-        y_par: y parent, float
-        mag_par: magnitude parent, float
-        mag4spat: scaled magnitude to use for spatial pdf, float
-        main_mag_ref: keeps track of the original mainshock that generated all 
-                      the events
-        if necessary, this could be subdivided in generate_time_offspring,
-        generate_space_offspring, generate_mag_offspring and track_info
-        '''
+    def generate_offsprings(params, model, num_offspr, time_par, x_par, y_par,
+                            mag_parent, mag4spat, par_main_mag=None):
         b = params['b']
         mag_threshold = params['min_mag']
         mag_max = params['max_mag']
         # this tracks the magnitude of the mainshock causing all the event tree
-        if main_mag_ref is None:
-            main_mag_ref = mag_par
-        
-        #######################################################################
+        if par_main_mag is None:
+            par_main_mag = mag_parent
         
         # g = (p - 1)/c * np.power(1. + ttt/c, -p)
         u = uniform.rvs(size=num_offspr)
@@ -818,11 +703,9 @@ class EtasSimulator():
         t_offspr = t_offspr[t_offspr >= 0.]
         num_offspr = t_offspr.shape[0]
         
-        #######################################################################
-        
         if num_offspr > 0:
             # b = (1. / gl['mm'].mean())/np.log(10.)
-            mmax = min(main_mag_ref, mag_max)
+            mmax = min(par_main_mag, mag_max)
             mmin = mag_threshold
             # m_offspr = mmin + (np.log10(1.-u*(1.-10.**(-b*(mmax-mmin)))))/(-b)
             u = uniform.rvs(size=num_offspr)
@@ -830,22 +713,20 @@ class EtasSimulator():
                 if not model["incompletess"]:
                     m_offspr = inv_cdf_magnitude_trunc(u, b, mmin, mmax)
                 elif model["incompletess"]:
-                    coeffs = [params["c1"], params["c2"], params["c3"]]
-                    if mag_par >= params["incompl_min_mag"] and params["gr_incompl"]:
-                        mc = np.clip(compl_vs_time_general(mag_par, deltat, *coeffs),
-                                      mmin, mag_par)
-                    else:
-                        mc = mmin
-                    # mc = mmin
+                    # coeffs = [params["c1"], params["c2"], params["c3"]]
+                    # if mag_parent >= params["incompl_min_mag"]:
+                    #     mc = np.clip(compl_vs_time_general(mag_parent, deltat, *coeffs),
+                    #                  mmin, mag_parent)
+                    # else:
+                    #     mc = mmin
+                    mc = mmin
                     m_offspr = inv_cdf_magnitude_trunc(u, b, mc, mmax)
              
             elif not model["magnitudetrunc"]:
                 raise Exception("mag model untrunc not implemented")
             else:
                 raise Exception("unknown mag model")
-        
-            ###################################################################
-        
+            
             u_r = uniform.rvs(size=num_offspr)
             u_theta = uniform.rvs(size=num_offspr) # loc=0., scale=2*np.pi, size=num_offspr)
             dm = mag4spat-mag_threshold
@@ -877,32 +758,43 @@ class EtasSimulator():
             m_offspr = np.array([])
         
         # out
-        o = {'tt': t_offspr,
-             'xx': x_offspr,
-             'yy': y_offspr,
-             'mm': m_offspr-mag_threshold,
-             'magnitude': m_offspr,
-             'geom': [None]*t_offspr.shape[0],
-             'isspontaneous': [False]*t_offspr.shape[0],
-             'main_mag_ref': [main_mag_ref]*t_offspr.shape[0]}
+            
+        o = pd.DataFrame(zip(t_offspr, x_offspr, y_offspr, m_offspr-mag_threshold,
+                             m_offspr, [None]*t_offspr.shape[0],
+                             [False]*t_offspr.shape[0],
+                             [par_main_mag]*t_offspr.shape[0], [mmax]*t_offspr.shape[0]),
+                         columns = ['tt','xx','yy','mm','magnitude','geom',
+                                    'isspontaneous','par_main_mag','check'])
         return o
     
     
-    
-    
-    
-    
 
+    
+    # @staticmethod
+    # def calc_timedep_mc(params, gg_next_generation, gg_past_events,
+    #                     mag_threshold, indtt):
+    #     mcs = list()
+    #     for g in gg_next_generation.itertuples(index=False): #.iterrows():
+    #         ind = (gg_past_events["tt"] < g[indtt]) & \
+    #               (g[indtt]-gg_past_events["tt"] < 1.) & \
+    #               (gg_past_events["magnitude"] >= params["incompl_min_mag"])
+    #         # ind = (gg_past_events["tt"] < g["tt"]) & \
+    #         #       (g["tt"]-gg_past_events["tt"] < 1.) & \
+    #         #       (gg_past_events["magnitude"] >= 6.)
+    #         if np.any(ind):
+    #             time = g[indtt] - gg_past_events.loc[ind]["tt"]
+    #             mag_par = gg_past_events.loc[ind]["magnitude"]
+    #             mc = params["c1"]*mag_par-params["c2"]-params["c3"]*np.log10(time)
+    #             mc = np.clip(mc.values, mag_threshold, mag_par)
+    #             mc_max = np.max(mc)
+    #             mcs.append(mc_max)
+    #         else:
+    #             mcs.append(mag_threshold)
+    #     return pd.Series(mcs, index=gg_next_generation.index)
+    
     @staticmethod
-    def calc_timedep_mc(params, next_generation_tt, past_events_tt,
-                        past_events_mag):
-        '''
-        params: dict
-        next_generation_tt: numpy nparray
-        past_events_tt: numpy nparray
-        past_events_mag: numpy nparray
-        '''
-        mag_threshold = params["min_mag"]
+    def calc_timedep_mc(params, next_generation_index, next_generation_tt,
+                        past_events_tt, past_events_mag, mag_threshold):
         mcs = list()
         for i, g in enumerate(next_generation_tt):
             ind = (past_events_tt < g) & \
@@ -919,7 +811,7 @@ class EtasSimulator():
                 mcs.append(mc_max)
             else:
                 mcs.append(mag_threshold)
-        return np.array(mcs)
+        return pd.Series(mcs, index=next_generation_index)
     
 
     @staticmethod
@@ -989,7 +881,12 @@ class EtasSimulator():
 
 
     @staticmethod
-    def integrate_background_gridded(bkg, gen0, params, filters):
+    def get_background_gridded(bkg, gen0, params, filters):
+        '''
+        background simulations
+        gridded background
+        '''
+        
         if filters["t_start"] is None or filters["t_end"] is None:
             raise Exception("specify t_start and t_end in filters")
         if "mu" not in params.keys():
@@ -997,7 +894,12 @@ class EtasSimulator():
         
         t_start = filters["t_start"]
         t_end = filters["t_end"]
+        study_length = t_end-t_start
 
+        b = params['b']
+        mag_threshold = mmin = params['min_mag']
+        mmax = params['max_mag']
+        
         yy, xx = np.meshgrid(bkg['lat'], bkg['lon'])
         xy = longlat2xy(xx, yy,
                         np.mean(gen0['longitude']),
@@ -1016,31 +918,11 @@ class EtasSimulator():
         region_win = get_region(region_win["x"], region_win["y"])
         
         # total integral of background seismicity in time window and area
-        #TODO super slow
+         #TODO super slow
         integ0 = EtasMleBkg.calc_integ_bkg(bkg1, region_win,
                                            {'study_start': t_start,
                                             'study_end': t_end})
-        return {"bkg1": bkg1, "region_win": region_win, "integ0": integ0}
-
-
-
-    @staticmethod
-    def get_background_gridded(bkg, params, filters):
-        '''
-        background simulations with gridded background
-        '''
-        
-        bkg1 = bkg["bkg1"]
-        region_win = bkg["region_win"]
-        integ0 = bkg["integ0"]
-        
-        t_start = filters["t_start"]
-        t_end = filters["t_end"]
-        study_length = t_end-t_start
-
-        b = params['b']
-        mag_threshold = mmin = params['min_mag']
-        mmax = params['max_mag']
+        print(integ0)
         
         # number time and location of events
         num_events = np.random.poisson(integ0)
@@ -1072,14 +954,11 @@ class EtasSimulator():
         m_bkg = inv_cdf_magnitude_trunc(u, b, mmin, mmax)
 
         # output
-        o = {"tt": t_bkg,
-             "xx": x_bkg,
-             "yy": y_bkg,
-             "mm": m_bkg-mag_threshold,
-             "magnitude": m_bkg,
-             "geom": [None]*num_events,
-             "isspontaneous": ["bkg"]*num_events,
-             'main_mag_ref': [None]*num_events}
+        o = pd.DataFrame(zip(t_bkg, x_bkg, y_bkg, m_bkg-mag_threshold,
+                             m_bkg, [None]*num_events, ["bkg"]*num_events,
+                             [None]*num_events, [None]*num_events),
+                         columns = ['tt','xx','yy','mm','magnitude','geom',
+                                    'isspontaneous','par_main_mag','check'])
         return o
 
 

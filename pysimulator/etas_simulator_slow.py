@@ -580,35 +580,12 @@ class EtasSimulator():
         
         if gen01["tt"].shape[0] == 0:
             return gen01
-        gg = [gen01] # list with each generation, regardless the parent event
-        
-        timedep_mc = None
-        if model["incompletess"]:
-            timedep_mc = EtasSimulator.calc_timedep_mc(params,
-                                                       # gg[-1].index,
-                                                       gg[-1]["tt"],
-                                                       gg[-1]["tt"],
-                                                       gg[-1]["magnitude"])
-        gl = EtasSimulator.get_following_generation(gg[-1], params, model,
-                                                    timedep_mc, filters)
-        if len(gl) != 0:
-            gg.append(concat_list(gl))
-        
-        if not only_first_generation:
-            l = 1
-            while len(gl) != 0:
-                if model["incompletess"]:
-                    temp = concat_list(gg, ["tt", "magnitude"])
-                    timedep_mc = EtasSimulator.calc_timedep_mc(params,
-                                                               gg[-1]["tt"],
-                                                               temp["tt"],
-                                                               temp["magnitude"])
-                gl = EtasSimulator.get_following_generation(gg[-1], params, model,
-                                                            timedep_mc, filters)
-                if len(gl) != 0:
-                    gg.append(concat_list(gl))
-                    l += 1
-        stoch_catalog = concat_list(gg)
+
+        # initialize stochastic catalog
+        stoch_catalog = copy(gen01)
+        # add offspring        
+        stoch_catalog = EtasSimulator.add_offspring(stoch_catalog, params,
+                                                    model, filters)
         
         # convert x y in lon lat
         proj = xy2longlat(stoch_catalog['xx'],
@@ -645,99 +622,98 @@ class EtasSimulator():
 
 
 
+
+
     @staticmethod
-    def get_following_generation(gen, params, model, timedep_mc, filters):
-        ''' For each event i , namely (ti, xi, yi, mi), in the catalog G(l), 
-        simulate its N(i) offspring, namely, Oi(l) where N(i) is a Poisson random
-        variable with a mean of κ(mi), and tk(i) (xk(i), yk(i)) and mk(i) are
-        generated from the probability densities g, f and s respectively. 
-        Let Oi(l) ← {(tk , xk , yk , mk)} where tk in [t, t + dt].
-        
-        # for km (productivity): the expectation of the number of children
-        # (unit: events) spawned by an event of magnitude m
-        A = fit.param['A']
-        alpha = fit.param['alpha']
-        
-        # for the pdf of the length of the time interval between a child and its
-        # parent (unit: day−1)
-        c = fit.param['c']
-        p = fit.param['p']
-        
-        # for the pdf of the relative locations between the parent and children
-        # (unit: deg−2)
-        D = fit.param['D']
-        q = fit.param['q']
-        gamma = fit.param['gamma']
-        '''
+    def add_offspring(st_cat, params, model, filters):
         mag_threshold = params['min_mag']
         t_start = filters["t_start"]
         t_end = filters["t_end"]
+        scal_rel = WC1994()
+        # handle duplicates in time (important for chronologic order)
         
-        # account for full fault geometry
-        mag_par = list()
-        mag4spat = list()
-        time_par = list()
-        x_par = list()
-        y_par = list()
-        points = list()
-        timedep_mc_par = list()
-        main_mag_ref = list()
-        wc = WC1994()
-        for par, geom in enumerate(gen['geom']):
+        # sort in chronologic order (also create a soft copy)
+        st_cat = sort_by(st_cat, 'tt')
+        # keep track of processed events
+        track = [False]*st_cat["tt"].shape[0]
+        while ~np.all(track): # until all events are processed
+            # proceed in chronologic order to make sure we have all the events
+            # for the time dependent completeness magnitude calculation
+            temp = np.where(st_cat['tt'] == np.min(st_cat['tt'][~np.array(track)]))[0]
+            if temp.shape[0] > 1:
+                raise Exception("temporal duplicates in the input catalog!")
+            par = temp[0]
+            track[par] = True
+            time_par = st_cat['tt'][par]
+            if model["incompletess"]:
+                timedep_mc_par = EtasSimulator.calc_timedep_mc(params,
+                                                               time_par,
+                                                               st_cat["tt"],
+                                                               st_cat["magnitude"])
+            mag_par = st_cat['magnitude'][par]
+            main_mag_ref = st_cat["main_mag_ref"][par]
+            geom = st_cat['geom'][par]
             if geom is None:
-                mag_par.append(gen['magnitude'][par])
-                mag4spat.append(gen['magnitude'][par])
-                time_par.append(gen['tt'][par])
-                x_par.append(gen['xx'][par])
-                y_par.append(gen['yy'][par])
-                points.append(1)
-                if timedep_mc is not None:
-                    timedep_mc_par.append(timedep_mc[par])
+                mag4spat = st_cat['magnitude'][par]
+                x_par = st_cat['xx'][par]
+                y_par = st_cat['yy'][par]
+                # productivity
+                if model["incompletess"]:
+                    km = params["A"] * np.exp(params["alpha"] * \
+                                                      (mag_par-timedep_mc_par))
                 else:
-                    timedep_mc_par.append(None)
-                main_mag_ref.append(gen["main_mag_ref"][par])
+                    km = params["A"] * np.exp(params["alpha"] * \
+                                                       (mag_par-mag_threshold))
+                ni = poisson.rvs(km) # random number of offspring events
+                if ni > 0:
+                    o = EtasSimulator.generate_offspring(params, model, ni,
+                                                         time_par, x_par, y_par,
+                                                         mag_par, mag4spat,
+                                                         main_mag_ref)
+                    # preliminary filtering in time 
+                    # the t_start filtering is necessary to avoid including events
+                    # not seen in the input catalog. the t_end filtering is to
+                    # avoid unnecessary computational burden (they get filtered
+                    # anyway at the end)
+                    o = EtasSimulator.filter_events_time(o, t_start, t_end)
+                    if (o["tt"]).shape[0] != 0:
+                        st_cat = concat(st_cat, o)
+                        for j in range((o["tt"]).shape[0]):
+                            track.append(False)
+            # account for full fault geometry
             else:
-                for i in range(0, geom['x'].shape[0]):
-                    mag_par.append(gen['magnitude'][par])
-                    time_par.append(gen['tt'][par])
-                    x_par.append(geom['x'][i])
-                    y_par.append(geom['y'][i])
-                    points.append(geom['x'].shape[0])
-                    if timedep_mc is not None:
-                        timedep_mc_par.append(timedep_mc[par])
-                    else:
-                        timedep_mc_par.append(None)
-                    # mag4spat.append(mag_par[-1])
-                    mag4spat.append( np.max([ mag_threshold,
-                                       wc.get_median_mag(wc.get_median_area(mag_par[-1], None)/points[-1], None) ]))
-                    main_mag_ref.append(gen["main_mag_ref"][par])
-                    
-        # productivity (corrected by the number of points UCERF3)
-        if timedep_mc is None:
-            km = (params["A"] / np.array(points)) * np.exp(params["alpha"] * \
-                                              (np.array(mag_par)-mag_threshold))
-        else:
-            km = (params["A"] / np.array(points)) * np.exp(params["alpha"] * \
-                                              (np.array(mag_par)-np.array(timedep_mc_par)))
+                points = geom['x'].shape[0]
+                mag4spat = np.max([ mag_threshold,
+                             scal_rel.get_median_mag(scal_rel.get_median_area(
+                                                mag_par, None)/points, None) ])
+                # productivity (corrected by the number of points)
+                if model["incompletess"]:
+                    km = (params["A"] / points) * np.exp(params["alpha"] * \
+                                                            (mag_par-timedep_mc_par))
+                else:
+                    km = (params["A"] / points) * np.exp(params["alpha"] * \
+                                                          (mag_par-mag_threshold))
+                ni = poisson.rvs([km]*points) # random number of offspring events
+                for i in range(0, points):    
+                    x_par = geom['x'][i]
+                    y_par = geom['y'][i]
+                    if ni[i] > 0:
+                        o = EtasSimulator.generate_offspring(params, model, ni[i],
+                                                             time_par, x_par, y_par,
+                                                             mag_par, mag4spat,
+                                                             main_mag_ref)
+                        # preliminary filtering in time 
+                        # the t_start filtering is necessary to avoid including events
+                        # not seen in the input catalog. the t_end filtering is to
+                        # avoid unnecessary computational burden (they get filtered
+                        # anyway at the end)
+                        o = EtasSimulator.filter_events_time(o, t_start, t_end)
+                        if (o["tt"]).shape[0] != 0:
+                            st_cat = concat(st_cat, o)
+                            for j in range((o["tt"]).shape[0]):
+                                track.append(False)
+        return st_cat
 
-        # random number of offspring events
-        ni = poisson.rvs(km)
-        if isinstance(ni, int):
-            ni = np.array([ni])
-    
-        ol = list() # list of offspring for each event of the generation l
-        for par in range(0, ni.shape[0]):
-            if ni[par] > 0:
-                o = EtasSimulator.generate_offspring(params, model, ni[par],
-                                                     time_par[par],
-                                                     x_par[par], y_par[par],
-                                                     mag_par[par],
-                                                     mag4spat[par],
-                                                     main_mag_ref[par])
-                # preliminary filtering in time avoids unnecessary computational burden
-                o = EtasSimulator.filter_events_time(o, t_start, t_end)
-                ol.append(o)
-        return ol
     
     
     
@@ -886,40 +862,46 @@ class EtasSimulator():
              'isspontaneous': [False]*t_offspr.shape[0],
              'main_mag_ref': [main_mag_ref]*t_offspr.shape[0]}
         return o
-    
-    
-    
-    
+
     
     
 
     @staticmethod
-    def calc_timedep_mc(params, next_generation_tt, past_events_tt,
-                        past_events_mag):
+    def calc_all_timedep_mc(params, target_tt, prev_events_tt, prev_events_mag):
         '''
-        params: dict
-        next_generation_tt: numpy nparray
-        past_events_tt: numpy nparray
-        past_events_mag: numpy nparray
+        compute the time dependent completeness magnitude all at once
+        target_tt: numpy nparray
+        prev_events_tt: numpy nparray
+        prev_events_mag: numpy nparray
         '''
         mag_threshold = params["min_mag"]
         mcs = list()
-        for i, g in enumerate(next_generation_tt):
-            ind = (past_events_tt < g) & \
-                  (g-past_events_tt < 1.) & \
-                  (past_events_mag >= params["incompl_min_mag"])
-            if np.any(ind):
-                time = g - past_events_tt[ind]
-                mag_par = past_events_mag[ind]
-                # mc = params["c1"]*mag_par-params["c2"]-params["c3"]*np.log10(time)
-                coeffs = [params["c1"], params["c2"], params["c3"]]                
-                mc = compl_vs_time_general(mag_par, time, *coeffs)
-                mc = np.clip(mc, mag_threshold, mag_par)
-                mc_max = np.max(mc)
-                mcs.append(mc_max)
-            else:
-                mcs.append(mag_threshold)
+        for i, g in enumerate(target_tt):
+            mcs.append(EtasSimulator.calc_timedep_mc(params, g, prev_events_tt,
+                                                     prev_events_mag))
         return np.array(mcs)
+
+    
+    
+    @staticmethod
+    def calc_timedep_mc(params, current_time, prev_events_tt, prev_events_mag):
+        mag_threshold = params["min_mag"]
+        ind = (prev_events_tt < current_time) & \
+              (current_time - prev_events_tt < 1.) & \
+              (prev_events_mag >= params["incompl_min_mag"])
+        if np.any(ind):
+            time = current_time - prev_events_tt[ind]
+            mag_par = prev_events_mag[ind]
+            # mc = params["c1"]*mag_par-params["c2"]-params["c3"]*np.log10(time)
+            coeffs = [params["c1"], params["c2"], params["c3"]]                
+            mc = compl_vs_time_general(mag_par, time, *coeffs)
+            mc = np.clip(mc, mag_threshold, mag_par)
+            mc_max = np.max(mc)
+            return mc_max
+        else:
+            return mag_threshold    
+    
+    
     
 
     @staticmethod
