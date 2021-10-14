@@ -323,7 +323,8 @@ def get_pmf(data):
 
 
 
-def plot_time_etas_bulk(simulations, mag_threshold, ax=None, show=False):
+def plot_time_etas_bulk(simulations, mag_threshold, show_random=True,
+                        ax=None, show=False):
     res = get_cumnum_matrix_vs_time(simulations, mag_threshold)
     
     if ax is None:
@@ -336,8 +337,9 @@ def plot_time_etas_bulk(simulations, mag_threshold, ax=None, show=False):
                     np.percentile(res["num_matrix"], 2.5, axis=0),
                     np.percentile(res["num_matrix"], 97.5, axis=0), color="r",
                     alpha=.2, label=r"$2.5^{th}-97.5^{th}$ percentile range")
-    ax.plot(res["time_vec"], np.percentile(res["num_matrix"], 50, axis=0), 
-            color="r", linewidth=2., label=r'Median simulations')
+    if show_random:
+        ax.plot(res["time_vec"], np.percentile(res["num_matrix"], 50, axis=0), 
+                color="r", linewidth=2., label=r'Median simulations')
     handles, labes = plt.gca().get_legend_handles_labels()
     by_label = dict(zip(labes, handles))
     ax.legend(by_label.values(), by_label.keys())
