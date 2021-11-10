@@ -20,7 +20,7 @@ from openquake.calculators import base
 from openquake.hazardlib import valid
 
 from pyrisk.spatial_pca.spatial_pca_residuals import SpatialPcaResiduals
-from pyrisk.simulator.ground_motion_container import (GmfGroupContainer,
+from pysimulator.ground_motion_container import (GmfGroupContainer,
                                                       GmfCatalogContainer)
 from myutils.run_multiprocess import run_multiprocess
 

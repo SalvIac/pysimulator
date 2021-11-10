@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Module :mod:`pyrisk.simulator.etas_simulator` defines
+Module :mod:`pysimulator.etas_simulator` defines
 :class:`EtasSimulator`.
 """
 
@@ -139,7 +139,7 @@ class EtasSimulator():
                    max_mag upper bound magnitude (mag-freq distr)
                    c1, c2, c3 (incompleteness model, optional, Helmstetter default)
                    in the future: mag_empirical
-    :param input_catalog: instance of :class:`~pyrisk.simulator.custom_catalog.CustomCatalog`
+    :param input_catalog: instance of :class:`~pysimulator.custom_catalog.CustomCatalog`
                           class or list of instaces.
     :param model: string, default: "timetrunc:True_magnitudetrunc:True_spatialpdf:5_incompletess:True"
     :param nodal_planes_distr:
@@ -630,7 +630,6 @@ class EtasSimulator():
         t_start = filters["t_start"]
         t_end = filters["t_end"]
         scal_rel = WC1994()
-        # handle duplicates in time (important for chronologic order)
         
         # sort in chronologic order (also create a soft copy)
         st_cat = sort_by(st_cat, 'tt')
@@ -802,19 +801,38 @@ class EtasSimulator():
             mmin = mag_threshold
             # m_offspr = mmin + (np.log10(1.-u*(1.-10.**(-b*(mmax-mmin)))))/(-b)
             u = uniform.rvs(size=num_offspr)
+
             if model["magnitudetrunc"]:
-                if not model["incompletess"]:
-                    m_offspr = inv_cdf_magnitude_trunc(u, b, mmin, mmax)
-                elif model["incompletess"]:
-                    coeffs = [params["c1"], params["c2"], params["c3"]]
-                    if mag_par >= params["incompl_min_mag"] and params["gr_incompl"]:
-                        mc = np.clip(compl_vs_time_general(mag_par, deltat, *coeffs),
-                                      mmin, mag_par)
-                    else:
-                        mc = mmin
-                    # mc = mmin
-                    m_offspr = inv_cdf_magnitude_trunc(u, b, mc, mmax)
-             
+                if isinstance(model["magnitudetrunc"], dict): #TODO I don't like that I use magnitudetrunc
+                    # use random sampling from array
+                    m_offspr = list()
+                    mfdt = model["magnitudetrunc"]
+                    for dt in t_offspr:
+                        ind = np.where(mfdt["time"] < dt)[0][-1]
+                        if mfdt["magnitude"][ind].shape[0] != 0:
+                            m_offspr.append( np.random.choice(mfdt["magnitude"][ind],
+                                                              size=1)[0] )
+                        else:
+                            m_offspr.append( np.random.choice(mfdt["magnitude"][ind+1],
+                                                              size=1)[0] )
+                        # shift = test_shift(mfdt["time"], dt, time_parent, 5)
+                        # ind = np.logical_and(mfdt["time"] <= dt+shift, mfdt["time"] >= time_parent-shift)
+                        # m_offspr.append( np.random.choice(mfdt["magnitude"][ind], size=1)[0] )
+                    m_offspr = np.array(m_offspr)
+
+                else:
+                    if not model["incompletess"]:
+                        m_offspr = inv_cdf_magnitude_trunc(u, b, mmin, mmax)
+                    elif model["incompletess"]:
+                        coeffs = [params["c1"], params["c2"], params["c3"]]
+                        if mag_par >= params["incompl_min_mag"] and params["gr_incompl"]:
+                            mc = np.clip(compl_vs_time_general(mag_par, deltat, *coeffs),
+                                          mmin, mag_par)
+                        else:
+                            mc = mmin
+                        # mc = mmin
+                        m_offspr = inv_cdf_magnitude_trunc(u, b, mc, mmax)
+
             elif not model["magnitudetrunc"]:
                 raise Exception("mag model untrunc not implemented")
             else:
@@ -874,7 +892,6 @@ class EtasSimulator():
         prev_events_tt: numpy nparray
         prev_events_mag: numpy nparray
         '''
-        mag_threshold = params["min_mag"]
         mcs = list()
         for i, g in enumerate(target_tt):
             mcs.append(EtasSimulator.calc_timedep_mc(params, g, prev_events_tt,
