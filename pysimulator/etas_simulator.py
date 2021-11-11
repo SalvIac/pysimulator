@@ -32,88 +32,9 @@ from pysimulator.simulation_functions import (inv_cdf_magnitude_trunc,
                                               compl_vs_time_general)
 from pysimulator.custom_catalog import CustomCatalog
 from pysimulator.rupture_builder import RuptureBuilder
+from pysimulator.etas_simulator_slow import (concat, concat_list, filter_dict,
+                                             filter_dict, sort_by)
 from myutils.run_multiprocess import run_multiprocess
-
-
-
-
-def concat(dict1, dict2, keys=None):
-    '''
-    append dict2 to dict1 (faster than pd.concat for two dicts)
-    '''
-    if keys is None:
-        dict1 = copy(dict1) # avoid reference
-    else:
-        dict1 = {key: dict1[key] for key in keys}
-    keys2 = list(dict2.keys())
-    if len(keys2) == 0:
-        return dict1
-    keys1 = list(dict1.keys())
-    for key in keys1:
-        if key in keys2:
-            temp = dict2[key]
-        else:
-            temp = [None]*len(dict2[keys2[0]])
-        if isinstance(dict1[key], list):
-            newlist = copy(dict1[key]) # avoid reference
-            for val in temp:
-                newlist.append(val)
-            dict1[key] = newlist
-        elif isinstance(dict1[key], np.ndarray):
-            newlist = dict1[key].tolist()
-            for val in temp:
-                newlist.append(val)
-            dict1[key] = np.array(newlist)
-        else:
-            raise Exception("wrong datatype in dict1, it must be list or np.ndarray")
-    # # check
-    # alllen = list()
-    # for key in dict1.keys():
-    #     alllen.append( len(dict1[key]) )
-    return dict1
-
-
-
-def concat_list(dicts, keys=None):
-    dict1 = dicts[0]
-    for dict2 in dicts[1:]:
-        dict1 = concat(dict1, dict2, keys)
-    return dict1
-
-
-
-def filter_dict(dict1, filt):
-    '''
-    ind: bool array
-    '''
-    dict2 = copy(dict1) # avoid reference
-    for key in dict2.keys():
-        if isinstance(dict2[key], list):
-            newlist = list(compress(dict2[key], filt))
-            dict2[key] = newlist
-        elif isinstance(dict2[key], np.ndarray):
-            newlist = dict2[key][filt]
-            dict2[key] = np.array(newlist)
-        else:
-            raise Exception("wrong datatype in dict1, it must be list or np.ndarray")
-    return dict2
-
-
-
-def sort_by(dict1, bykey):
-    dict2 = copy(dict1) # avoid reference
-    inds = np.argsort(dict2[bykey])
-    for key in dict2.keys():
-        if isinstance(dict2[key], list):
-            newlist = list()
-            for i in inds:
-                newlist.append(dict2[key][i])
-            dict2[key] = newlist
-        elif isinstance(dict2[key], np.ndarray):
-            dict2[key] = dict2[key][inds]
-        else:
-            raise Exception("wrong datatype in dict1, it must be list or np.ndarray")
-    return dict2
 
 
 

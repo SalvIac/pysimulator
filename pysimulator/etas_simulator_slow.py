@@ -721,6 +721,8 @@ class EtasSimulator():
         if region is not None:
             filt = np.array([Point(xxx, yyy).within(region) for xxx, yyy 
                              in zip(o['longitude'], o['latitude'])])
+            if len(filt) == 0:
+                return o
             o = filter_dict(o, filt)
         return o
     
