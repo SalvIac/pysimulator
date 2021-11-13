@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-@author: Salvatore
+@author: Salvatore Iacoletti
 """
+
 
 import numpy as np
 import scipy.stats
@@ -11,9 +12,10 @@ from openquake.baselib.general import AccumDict
 from openquake.hazardlib.const import StdDev
 from openquake.hazardlib.gsim.base import ContextMaker
 from openquake.hazardlib.imt import from_string
-from openquake.hazardlib.calc.gmf import to_imt_unit_values, rvs
+from openquake.hazardlib.calc.gmf import exp, rvs
 from openquake.hazardlib.site import SiteCollection
 from openquake.hazardlib.gsim.base import ContextMaker, FarAwayRupture
+from openquake.hazardlib.cross_correlation import NoCrossCorrelation
 from openquake.commonlib import oqvalidation
 from openquake.calculators import base
 from openquake.hazardlib import valid
@@ -163,6 +165,7 @@ class GroundMotion():
                                           sitecol=sitecol, 
                                           cmaker=cmaker)
             computers.append(gmf_computer)
+        # (4, G, M, N)
         mean_stds = cmaker.get_mean_stds([gmf_computer.ctx for gmf_computer in computers])
         c = 0 # keep track of events (to get the normalized residuals)
         gmfs = list()
@@ -244,7 +247,7 @@ class GmfComputerMod(object):
     # a matrix of size (I, N, E) is returned, where I is the number of
     # IMTs, N the number of affected sites and E the number of events. The
     def __init__(self, rupture, sitecol, cmaker, correlation_model=None,
-                 amplifier=None, sec_perils=()):
+                 cross_correl=None, amplifier=None, sec_perils=()):
         if len(sitecol) == 0:
             raise ValueError('No sites')
         elif len(cmaker.imtls) == 0:
@@ -272,26 +275,21 @@ class GmfComputerMod(object):
         self.ctx = ctxs[0]
         if correlation_model:  # store the filtered sitecol
             self.sites = sitecol.complete.filtered(self.ctx.sids)
-        if cmaker.trunclevel is None:
-            self.distribution = scipy.stats.norm()
-        elif cmaker.trunclevel == 0:
-            self.distribution = None
-        else:
-            assert cmaker.trunclevel > 0, cmaker.trunclevel
-            self.distribution = scipy.stats.truncnorm(
-                - cmaker.trunclevel, cmaker.trunclevel)
+        self.cross_correl = cross_correl or NoCrossCorrelation(
+            cmaker.trunclevel)
 
-    # def compute_all(self, min_iml, rlzs_by_gsim, sig_eps=None):
+    # def compute_all(self, sig_eps=None):
     #     """
-    #     :returns: (dict with fields eid, sid, gmv_...), dt
+    #     :returns: (dict with fields eid, sid, gmv_X, ...), dt
     #     """
+    #     min_iml = self.cmaker.min_iml
+    #     rlzs_by_gsim = self.cmaker.gsims
     #     t0 = time.time()
-    #     sids = self.sids
+    #     sids = self.ctx.sids
     #     eids_by_rlz = self.ebrupture.get_eids_by_rlz(rlzs_by_gsim)
     #     mag = self.ebrupture.rupture.mag
     #     data = AccumDict(accum=[])
-    #     mean_stds = self.cmaker.get_mean_stds([self.ctx], StdDev.EVENT)
-    #     # G arrays of shape (O, N, M)
+    #     mean_stds = self.cmaker.get_mean_stds([self.ctx])  # (4, G, M, N)
     #     for g, (gs, rlzs) in enumerate(rlzs_by_gsim.items()):
     #         num_events = sum(len(eids_by_rlz[rlz]) for rlz in rlzs)
     #         if num_events == 0:  # it may happen
@@ -299,8 +297,8 @@ class GmfComputerMod(object):
     #         # NB: the trick for performance is to keep the call to
     #         # .compute outside of the loop over the realizations;
     #         # it is better to have few calls producing big arrays
-    #         array, sig, eps = self.compute(gs, num_events, mean_stds[g])
-    #         M, N, E = array.shape
+    #         array, sig, eps = self.compute(gs, num_events, mean_stds[:, g])
+    #         M, N, E = array.shape  # sig and eps have shapes (M, E) instead
     #         for n in range(N):
     #             for e in range(E):
     #                 if (array[:, n, e] < min_iml).all():
@@ -339,14 +337,12 @@ class GmfComputerMod(object):
         """
         :param gsim: GSIM used to compute mean_stds
         :param num_events: the number of seismic events
-        :param mean_stds: array of shape O, M, N
+        :param mean_stds: array of shape (4, M, N)
         :returns:
             a 32 bit array of shape (num_imts, num_sites, num_events) and
-            two arrays with shape (num_imts, num_events): sig for stddev_inter
+            two arrays with shape (num_imts, num_events): sig for tau
             and eps for the random part
         """
-        result = np.zeros(
-                 (len(self.imts), len(self.ctx.sids), num_events), F32)
         if norm_res is not None:
             if len(self.imts) != norm_res.shape[1]:
                 raise Exception("number of imt in norm_res does not correspond")
@@ -355,95 +351,97 @@ class GmfComputerMod(object):
             #TODO
             # if num_events != norm_res.shape[2]:
             #     raise Exception("number of events (i.e., simulations) in norm_res does not correspond")
-        
-        for imti, imt in enumerate(self.imts):
-            if norm_res is None:
-                result[imti] = self._compute(
-                  mean_stds[:, :, imti], num_events, imt, gsim, None)
-            else:
-                result[imti] = self._compute(
-                  mean_stds[:, :, imti], num_events, imt, gsim, norm_res[:, imti])
-        return result
-
-
-    def _compute(self, mean_stds, num_events, imt, gsim, norm_res=None):
-        """
-        :param mean_stds: array of shape (O, N)
-        :param num_events: the number of seismic events
-        :param imt: an IMT instance
-        :param gsim: a GSIM instance
-        :returns: (gmf(num_sites, num_events), stddev_inter(num_events),
-                    epsilons(num_events))
-        """
-        # num_sids = len(self.sids)
-        # num_outs = len(mean_stds)
+        M = len(self.imts)
+        result = np.zeros(
+            (len(self.imts), len(self.ctx.sids), num_events), F32)
+        sig = np.zeros((M, num_events), F32)  # same for all events
+        eps = np.zeros((M, num_events), F32)  # not the same
+        # numpy.random.seed(self.seed)
         num_sids = len(self.ctx.sids)
-        if self.distribution is None:
+        if self.cross_correl.distribution:
+            # build arrays of random numbers of shape (M, N, E) and (M, E)
+            intra_eps = [
+                rvs(self.cross_correl.distribution, num_sids, num_events)
+                for _ in range(M)]
+            inter_eps = self.cross_correl.get_inter_eps(self.imts, num_events)
+        else:
+            intra_eps = [None] * M
+            inter_eps = [np.zeros(num_events)] * M
+        for m, imt in enumerate(self.imts):
+            try:
+                if norm_res is None:
+                    result[m], sig[m], eps[m] = self._compute(
+                        mean_stds[:, m], imt, gsim, intra_eps[m], inter_eps[m],
+                        None)
+                else:
+                    result[m], sig[m], eps[m] = self._compute(
+                        mean_stds[:, m], imt, gsim, intra_eps[m], inter_eps[m],
+                        norm_res[:, m])
+            except Exception as exc:
+                raise RuntimeError(
+                    '(%s, %s) %s: %s' %
+                    (gsim, imt, exc.__class__.__name__, exc)
+                    ).with_traceback(exc.__traceback__)
+        if self.amplifier:
+            self.amplifier.amplify_gmfs(
+                self.ctx.ampcode, result, self.imts, self.seed)
+        return result, sig, eps
+
+    def _compute(self, mean_stds, imt, gsim, intra_eps, inter_eps):
+        if self.cmaker.trunclevel == 0:
             # for truncation_level = 0 there is only mean, no stds
             if self.correlation_model:
                 raise ValueError('truncation_level=0 requires '
                                  'no correlation model')
-            mean = mean_stds[0]
-            gmf = to_imt_unit_values(mean, imt)
-            gmf.shape += (1, )
-            gmf = gmf.repeat(num_events, axis=1)
-            return gmf
-        # elif gsim.DEFINED_FOR_STANDARD_DEVIATION_TYPES == {StdDev.TOTAL}:
-        #     raise Exception("not done")
-        #     # If the GSIM provides only total standard deviation, we need
-        #     # to compute mean and total standard deviation at the sites
-        #     # of interest.
-        #     # In this case, we also assume no correlation model is used.
-        #     if self.correlation_model:
-        #         raise CorrelationButNoInterIntraStdDevs(
-        #             self.correlation_model, gsim)
+            mean, _, _, _ = mean_stds
+            gmf = exp(mean, imt)[:, None]
+            gmf = gmf.repeat(len(inter_eps), axis=1)
+            inter_sig = 0
+        elif gsim.DEFINED_FOR_STANDARD_DEVIATION_TYPES == {StdDev.TOTAL}:
+            raise Exception("to complete")
+            # # If the GSIM provides only total standard deviation, we need
+            # # to compute mean and total standard deviation at the sites
+            # # of interest.
+            # # In this case, we also assume no correlation model is used.
+            # if self.correlation_model:
+            #     raise CorrelationButNoInterIntraStdDevs(
+            #         self.correlation_model, gsim)
 
-        #     mean, stddev_total = mean_stds[:2]
-        #     stddev_total = stddev_total.reshape(stddev_total.shape + (1, ))
-        #     mean = mean.reshape(mean.shape + (1, ))
-
-        #     total_residual = stddev_total * rvs(
-        #         self.distribution, num_sids, num_events)
-        #     gmf = to_imt_unit_values(mean + total_residual, imt)
-        #     stdi = numpy.nan
-        #     epsilons = numpy.empty(num_events, F32)
-        #     epsilons.fill(numpy.nan)
+            # mean, sig, _, _ = mean_stds
+            # gmf = exp(mean[:, None] + sig[:, None] * intra_eps, imt)
+            # inter_sig = np.nan
         else:
-            mean, stddev_total, stddev_inter, stddev_intra = mean_stds
-            stddev_intra = stddev_intra.T
-            stddev_inter = stddev_inter.T
-            mean = mean.T
-            if norm_res is None:
-                intra_residual = stddev_intra * rvs(
-                    self.distribution, num_sids, num_events)
-            else:
-                intra_residual = stddev_intra * norm_res
+            mean, sig, tau, phi = mean_stds
+            # the [:, None] is used to implement multiplication by row;
+            # for instance if  a = [1 2], b = [[1 2] [3 4]] then
+            # a[:, None] * b = [[1 2] [6 8]] which is the expected result;
+            # otherwise one would get multiplication by column [[1 4] [3 8]]
+            intra_res = phi[:, None] * intra_eps  # shape (N, E)
 
-            epsilons = rvs(self.distribution, num_events)
-            inter_residual = stddev_inter * epsilons
+            if self.correlation_model is not None:
+                intra_res = self.correlation_model.apply_correlation(
+                    self.sites, imt, intra_res, phi)
+                if len(intra_res.shape) == 1:  # a vector
+                    intra_res = intra_res[:, None]
 
-            gmf = to_imt_unit_values(
-                mean + intra_residual + inter_residual, imt)
-        return gmf
+            inter_res = tau[:, None] * inter_eps  # shape (N, 1) * E => (N, E)
+            gmf = exp(mean[:, None] + intra_res + inter_res, imt)  # (N, E)
+            inter_sig = tau.max()  # from shape (N, 1) => scalar
+        return gmf, inter_sig, inter_eps  # shapes (N, E), 1, E
 
     
     def set_seed(self, seed):
         np.random.seed(seed)
         
-
-
+    
+    
 #%% small test for GmfComputerMod
 
 if __name__ == "__main__":
     
-    from scipy.stats.mstats import gmean
-    import matplotlib.pyplot as plt
     from pysimulator.rupture_builder import RuptureBuilder
     from pyetas.map_earthquakes import MapEarthquakes
     from openquake.hazardlib.calc.gmf import GmfComputer
-    
-    # general settings
-    grid = 0.02
     
     # rupture settings
     mag = 6.0
@@ -455,19 +453,15 @@ if __name__ == "__main__":
     # gmpe settings
     params = {
               'calculation_mode': 'event_based',
-              "gsim": "Bradley2013",
-              "reference_backarc": False,
-              'reference_vs30_type': 'measured',
+              "gsim": "BooreAtkinson2011",
               'reference_vs30_value': '800.0',
-              'reference_depth_to_2pt5km_per_sec': '1.0',
-              'reference_depth_to_1pt0km_per_sec': '19.367',
               'truncation_level': '3',
               'maximum_distance': '200.0',
               }
     
     # grid settings
-    lons_bins = np.arange(-1., 1.1, grid)
-    lats_bins = np.arange(-1., 1.1, grid)
+    lons_bins = np.arange(-1., 1.1, 0.05)
+    lats_bins = np.arange(-1., 1.1, 0.05)
     lons, lats = np.meshgrid(lons_bins, lats_bins)
     lons = lons.flatten()
     lats = lats.flatten()
@@ -479,120 +473,32 @@ if __name__ == "__main__":
     # context maker
     gm = GroundMotion(params, lons, lats)
     
-    # gmf computer
-    gmf_computer = GmfComputerMod(rupture=rup,
-                                  sitecol=gm.sitecol, 
-                                  cmaker=gm.cmaker)
-    mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
-
-
-    #%% mean only
     
-    np.random.seed(42)
-    num_simulations = 1
+    #%% compute gmf
     
     gmf_computer = GmfComputerMod(rupture=rup,
                                   sitecol=gm.sitecol, 
                                   cmaker=gm.cmaker)
+    
     mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
-    gmf_computer.distribution = None
-    gmf_m = gmf_computer.compute(params["gsim"], num_simulations, mean_stds)
+    gmf_computer.compute(params["gsim"], 1, mean_stds)
+    
+    
+    #%%
 
-    # map
     xx = lons.reshape((lons_bins.shape[0], lats_bins.shape[0]))
     yy = lats.reshape((lons_bins.shape[0], lats_bins.shape[0]))
-    zz = gmf_m[0,:,0].reshape((lons_bins.shape[0], lats_bins.shape[0]))
+    zz = rate5.reshape((lons_bins.shape[0], lats_bins.shape[0]))
+
+    
     mpe = MapEarthquakes([-1,1,-1,1])
     con = mpe.ax.contourf(xx, yy, zz, alpha=0.5, cmap="jet")
-    # mpe.ax.scatter(lons, lats, s=2, color=[0.5,0.5,0.5], alpha=0.5)
+    mpe.ax.scatter(lons, lats, s=2, color=[0.5,0.5,0.5], alpha=0.5)
     mpe.ax.scatter(rup.surface.mesh.lons.flatten(),
                    rup.surface.mesh.lats.flatten(),
                    s=2, color="r", alpha=0.5)
-    cb = mpe.fig.colorbar(con, orientation="horizontal", label="PGA")
+    cb = mpe.ax.colorbar(con, location='right', label="PGA")
     mpe.look()
     mpe.show()
         
-    
-    # plot response spectrum for max pga index
-    ind = np.argmax(gmf_m[0,:,0])
-    rs_m = gmf_m[:,ind,0]
-    plt.figure()
-    plt.plot(gm.T_sim,rs_m)
-    plt.show()
-
-
-    #%% no pca
-    
-    np.random.seed(42)
-    num_simulations = 100
-    
-    gmf_computer = GmfComputerMod(rupture=rup,
-                                  sitecol=gm.sitecol, 
-                                  cmaker=gm.cmaker)
-    mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
-    gmf = gmf_computer.compute(params["gsim"], num_simulations, mean_stds)
-    
-    # check that over 10000 simulations, the mean is equal to the mean of the GMPE
-    # np.testing.assert_allclose(gmf_m[:,:,0], scipy.stats.mstats.gmean(gmf, axis=2))
-
-    # map
-    xx = lons.reshape((lons_bins.shape[0], lats_bins.shape[0]))
-    yy = lats.reshape((lons_bins.shape[0], lats_bins.shape[0]))
-    zz = gmf[0,:,0].reshape((lons_bins.shape[0], lats_bins.shape[0]))
-    mpe = MapEarthquakes([-1,1,-1,1])
-    con = mpe.ax.contourf(xx, yy, zz, alpha=0.5, cmap="jet")
-    # mpe.ax.scatter(lons, lats, s=2, color=[0.5,0.5,0.5], alpha=0.5)
-    mpe.ax.scatter(rup.surface.mesh.lons.flatten(),
-                   rup.surface.mesh.lats.flatten(),
-                   s=2, color="r", alpha=0.5)
-    cb = mpe.fig.colorbar(con, orientation="horizontal", label="PGA")
-    mpe.look()
-    mpe.show()
         
-    # plot response spectrum for max pga index
-    rs = gmf[:,ind,:]
-    plt.figure()
-    plt.plot(gm.T_sim, rs, color=[0.5,0.5,0.5])
-    plt.plot(gm.T_sim, rs_m, color="r")
-    plt.plot(gm.T_sim, gmean(gmf, axis=2)[:,ind])
-    plt.show()
-
-    
-    #%% with pca
-
-    np.random.seed(42)
-    num_simulations = 100
-    
-    gmf_computer = GmfComputerMod(rupture=rup,
-                                  sitecol=gm.sitecol, 
-                                  cmaker=gm.cmaker)
-    norm_res = gm.get_norm_res(num_simulations)
-    gmf = gmf_computer.compute(params["gsim"], num_simulations, mean_stds, norm_res)
-    
-    # check that over 10000 simulations, the mean is equal to the mean of the GMPE
-    # np.testing.assert_allclose(gmf_m[:,:,0], scipy.stats.mstats.gmean(gmf, axis=2))
-
-    # map
-    xx = lons.reshape((lons_bins.shape[0], lats_bins.shape[0]))
-    yy = lats.reshape((lons_bins.shape[0], lats_bins.shape[0]))
-    zz = gmf[0,:,0].reshape((lons_bins.shape[0], lats_bins.shape[0]))
-    mpe = MapEarthquakes([-1,1,-1,1])
-    con = mpe.ax.contourf(xx, yy, zz, alpha=0.5, cmap="jet")
-    # mpe.ax.scatter(lons, lats, s=2, color=[0.5,0.5,0.5], alpha=0.5)
-    mpe.ax.scatter(rup.surface.mesh.lons.flatten(),
-                   rup.surface.mesh.lats.flatten(),
-                   s=2, color="r", alpha=0.5)
-    cb = mpe.fig.colorbar(con, orientation="horizontal", label="PGA")
-    mpe.look()
-    mpe.show()
-        
-    # plot response spectrum for max pga index
-    rs = gmf[:,ind,:]
-    plt.figure()
-    plt.plot(gm.T_sim, rs, color=[0.5,0.5,0.5])
-    plt.plot(gm.T_sim, rs_m, color="r")
-    plt.plot(gm.T_sim, gmean(gmf, axis=2)[:,ind])
-    plt.show()
-
-
-    

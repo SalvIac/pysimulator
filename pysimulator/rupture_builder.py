@@ -23,7 +23,7 @@ from pysimulator.build_point_plane import get_point_surface
 '''
 RuptureBuilder can build a rupture (ParametricProbabilisticRupture in OQ) with
 fictitious rate (it should not be used) in the following cases:
-    - simple (not done, point source, init_point): mag, lon, lat, depth, strike, dip, rake
+    - simple (point source, init_point): mag, lon, lat, depth, strike, dip, rake
     - medium (init_surface_from_point): mag, lon, lat, depth,
                                         strike, dip, rake, mesh_spacing=1.
     - complex (init_surface): mag, lon, lat, depth,
