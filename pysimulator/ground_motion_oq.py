@@ -1,15 +1,29 @@
 # -*- coding: utf-8 -*-
+# pysimulator
+# Copyright (C) 2021-2022 Salvatore Iacoletti
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
-@author: Salvatore
 """
 
 import numpy as np
 import scipy.stats
 from tqdm import tqdm
+import toml
 
 from openquake.baselib.general import AccumDict
 from openquake.hazardlib.const import StdDev
-from openquake.hazardlib.gsim.base import ContextMaker
 from openquake.hazardlib.imt import from_string
 from openquake.hazardlib.calc.gmf import to_imt_unit_values, rvs
 from openquake.hazardlib.site import SiteCollection
@@ -17,6 +31,7 @@ from openquake.hazardlib.gsim.base import ContextMaker, FarAwayRupture
 from openquake.commonlib import oqvalidation
 from openquake.calculators import base
 from openquake.hazardlib import valid
+from openquake.hazardlib.gsim.base import registry
 
 from pyspatialpca.spatial_pca_residuals import SpatialPcaResiduals
 from pysimulator.ground_motion_container import (GmfGroupContainer,
@@ -34,7 +49,7 @@ class GroundMotion():
     T_sim = np.array([0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25,
                        0.3,  0.4,  0.5, 0.75, 1.   , 1.5, 2.  , 3. , 4.  , 5.])
     
-    def __init__(self, params, lons, lats, T_sim=None):
+    def __init__(self, params, lons, lats, T_sim=None, vs30=None):
         
         self.lons = lons
         self.lats = lats
@@ -53,9 +68,27 @@ class GroundMotion():
         req_site_params = ('z2pt5', 'z1pt0', 'backarc')
         self.sitecol = SiteCollection.from_points(lons, lats, depths, self.oq,
                                                   req_site_params)
+        if vs30 is not None:
+            self.sitecol.array["vs30"] = np.array(vs30)
+        
+        # ground motion model
+        value = self.oq.gsim
+        # #TODO in theory this should work but for some reason it calls the
+        # super init method only (can it be the python version?).
+        # copy-pasting some of the code inside valid.gim here works
+        # self.gsims = [valid.gsim(value)]
+        value = valid.to_toml(value)  # convert to TOML
+        [(gsim_name, kwargs)] = toml.loads(value).items()
+        kwargs = valid._fix_toml(kwargs)
+        try:
+            gsim_class = registry[gsim_name]
+        except KeyError:
+            raise ValueError('Unknown GSIM: %s' % gsim_name)
+        gs = gsim_class(**kwargs)
+        gs._toml = '\n'.join(line.strip() for line in value.splitlines())
+        self.gsims = [gs]
         
         # context maker
-        self.gsims = [valid.gsim(self.oq.gsim)]
         self.cmaker = ContextMaker('TRT', self.gsims, dict(imtls=self.oq.imtls,
                                     truncation_level=self.oq.truncation_level))
 
@@ -86,12 +119,25 @@ class GroundMotion():
         
         # count number of events (i.e., number of simulations of residuals)
         if spatialpca:
-            nsims = 0
+            nsims = 0 # in this case nsims is the number of events
             for catalog in catalogs:
                 nsims += catalog.get_num_events()
             print("number of normalized residuals: "+str(nsims))
             # this is for a faster simulations
             norm_res = self.get_norm_res(nsims)
+            
+            # this is to apply truncation (#TODO find a better way! this is superslow)
+            rep = [np.any(norm_res[:,:,i]>self.oq.truncation_level) or
+                   np.any(norm_res[:,:,i]<-self.oq.truncation_level) 
+                   for i in range(0, nsims)]
+            while np.any(rep):
+                norm_res2 = self.get_norm_res(np.sum(rep))
+                norm_res[:,:,rep] = norm_res2
+                rep = [np.any(norm_res[:,:,i]>self.oq.truncation_level) or
+                       np.any(norm_res[:,:,i]<-self.oq.truncation_level) 
+                       for i in range(0, nsims)]
+            ###################################### this is to apply truncation            
+            
             print(norm_res.shape)
             print(self.T_sim)
             print("done simulating normalized residuals")
@@ -172,10 +218,11 @@ class GroundMotion():
             gmf_computer = computers[r]
             if spatialpca:
                 res = gmf_computer.compute(gsims[0], 1,
-                                           mean_stds[:,0,:,r*num_sites:(r+1)*num_sites],
+                                           mean_stds[:,:,:,r*num_sites:(r+1)*num_sites],
                                            norm_res[:,:,c])
             else:
-                res = gmf_computer.compute(gsims[0], 1, mean_stds)
+                res = gmf_computer.compute(gsims[0], 1,
+                                           mean_stds[:,:,:,r*num_sites:(r+1)*num_sites])
             c += 1
             # #### check
             # import matplotlib.pyplot as plt
@@ -385,7 +432,7 @@ class GmfComputerMod(object):
                                  'no correlation model')
             mean = mean_stds[0]
             gmf = to_imt_unit_values(mean, imt)
-            gmf.shape += (1, )
+            gmf = gmf.T
             gmf = gmf.repeat(num_events, axis=1)
             return gmf
         # elif gsim.DEFINED_FOR_STANDARD_DEVIATION_TYPES == {StdDev.TOTAL}:
@@ -417,6 +464,8 @@ class GmfComputerMod(object):
                 intra_residual = stddev_intra * rvs(
                     self.distribution, num_sids, num_events)
             else:
+                if len(norm_res.shape) == 1:
+                    norm_res.shape += (1,)
                 intra_residual = stddev_intra * norm_res
 
             epsilons = rvs(self.distribution, num_events)
@@ -439,23 +488,24 @@ if __name__ == "__main__":
     from scipy.stats.mstats import gmean
     import matplotlib.pyplot as plt
     from pysimulator.rupture_builder import RuptureBuilder
-    from pyetas.map_earthquakes import MapEarthquakes
+    from pyplotting.map_earthquakes import MapEarthquakes
+    from pyerf.distributed.modify_distributed_mfds import get_polygon_influence
     from openquake.hazardlib.calc.gmf import GmfComputer
     
     # general settings
-    grid = 0.02
+    grid = 0.1
     
     # rupture settings
     mag = 6.0
     strike = 0.
     dip = 60
     rake = 0.
-    lon, lat, depth = 0., 0., 0.
+    lon, lat, depth = 0., 0., 5.
 
     # gmpe settings
     params = {
               'calculation_mode': 'event_based',
-              "gsim": "Bradley2013",
+              "gsim": "CauzziEtAl2014", # CauzziEtAl2014 # BindiEtAl2011 # BindiEtAl2014Rhyp # Bradley2013
               "reference_backarc": False,
               'reference_vs30_type': 'measured',
               'reference_vs30_value': '800.0',
@@ -466,11 +516,215 @@ if __name__ == "__main__":
               }
     
     # grid settings
-    lons_bins = np.arange(-1., 1.1, grid)
-    lats_bins = np.arange(-1., 1.1, grid)
+    lons_bins = np.arange(-1., 1., grid)+grid/2
+    lats_bins = np.arange(-1., 1., grid)+grid/2
     lons, lats = np.meshgrid(lons_bins, lats_bins)
     lons = lons.flatten()
     lats = lats.flatten()
+
+    
+    #%% some checks on median ground motion and std with magnitude
+    
+    T_sim=np.array([0.01, 0.1, 0.2, 0.5, 1.])
+    cols = ['r','b','g', 'm', [1, 0.5, 0], [0.5, 1, 0]]
+    mags = np.arange(5,8,0.1)
+    
+
+    # mean + total std only
+    fig, axs = plt.subplots(3, 1, figsize=(7.,16), sharex=True)
+
+    for dist, ax in zip([0., 0.2, 1.], axs):
+        mean_gms_m = list()
+        mean_gms = list()
+        mean_gms_p = list()
+        gm = GroundMotion(params, [dist], [0.], T_sim=T_sim)
+        for mag in mags:    
+            rup = RuptureBuilder.init_surface_from_point(mag, lon, lat, depth,
+                                                         strike, dip, rake)
+            gmf_computer = GmfComputerMod(rupture=rup,
+                                          sitecol=gm.sitecol, 
+                                          cmaker=gm.cmaker)
+            mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
+            m_m = mean_stds[0,0,:,0] - mean_stds[1,0,:,0]
+            m = mean_stds[0,0,:,0]
+            m_p = mean_stds[0,0,:,0] + mean_stds[1,0,:,0]
+
+            mean_gms_m.append(to_imt_unit_values(m_m, ""))
+            mean_gms.append(to_imt_unit_values(m, ""))
+            mean_gms_p.append(to_imt_unit_values(m_p, ""))
+        mean_gms_m = np.array(mean_gms_m)
+        mean_gms = np.array(mean_gms)
+        mean_gms_p = np.array(mean_gms_p)
+        
+        for t, ts in enumerate(T_sim):
+            ax.plot(mags, mean_gms[:,t], color=cols[t],
+                    label="SA("+str(ts)+"s)")
+            # ax.fill_between(mags, mean_gms_m[:,t], mean_gms_p[:,t],
+            #                 color=cols[t], alpha=.2)
+        ax.set_ylabel("Medians, distance: "+str(dist)+" deg")
+
+    ax.set_xlabel("Magnitude")
+    ax.legend()
+    plt.show()
+    
+
+
+    #%% mean stds with periods
+    
+    fig, ax = plt.subplots(1,1, figsize=(7.,6.))
+    gm = GroundMotion(params, [0.], [0.])
+    for i, mag in enumerate(np.arange(5, 8., 0.5)):
+        rup = RuptureBuilder.init_surface_from_point(mag, lon, lat, depth,
+                                                     strike, dip, rake)
+        gmf_computer = GmfComputerMod(rupture=rup,
+                                      sitecol=gm.sitecol, 
+                                      cmaker=gm.cmaker)
+        mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
+        ax.plot(gm.T_sim, to_imt_unit_values(mean_stds[0,0,:,0],""),
+                color=cols[i], label="mag "+str(mag))
+    ax.set_ylabel("mean")
+    ax.set_xlabel("T(s)")
+    ax.set_xscale("log")
+    ax.legend()
+    plt.show()
+    
+
+    
+    fig, ax = plt.subplots(1,1, figsize=(7.,6.))
+    gm = GroundMotion(params, [0.], [0.])
+    rup = RuptureBuilder.init_surface_from_point(mag, lon, lat, depth,
+                                                 strike, dip, rake)
+    gmf_computer = GmfComputerMod(rupture=rup,
+                                  sitecol=gm.sitecol, 
+                                  cmaker=gm.cmaker)
+    mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
+    legs = ["stddev total", "stddev inter", "stddev intra"]
+    for i in range(1,4):
+        ax.plot(gm.T_sim, mean_stds[i,0,:,0], color=cols[i-1], label=legs[i-1])
+    ax.set_ylabel("std")
+    ax.set_xlabel("T(s)")
+    ax.set_xscale("log")
+    ax.legend()
+    plt.show()
+    
+
+
+
+    #%% plot median and median + std fixing distance and varying mag for SA(0.1)
+    
+
+
+    mags = np.arange(5, 8., 0.1)
+    
+    params["gsim"] = "Bradley2013"
+    gm = GroundMotion(params, [0.], [0.], np.array([0.01, 0.2, 0.5, 1.0]))
+    mediansB = dict()
+    stdsB = dict()
+    for i, mag in enumerate(mags):
+        rup = RuptureBuilder.init_surface_from_point(mag, lon, lat, depth,
+                                                     strike, dip, rake)
+        gmf_computer = GmfComputerMod(rupture=rup,
+                                      sitecol=gm.sitecol, 
+                                      cmaker=gm.cmaker)
+        mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
+        for j, SA in enumerate(gm.T_sim):
+            if SA not in mediansB.keys():
+                mediansB[SA] = list()
+            if SA not in stdsB.keys():
+                stdsB[SA] = list()
+            mediansB[SA].append(mean_stds[0,0,j,0])
+            stdsB[SA].append(mean_stds[1,0,j,0])
+    
+
+    params["gsim"] = "CauzziEtAl2014" # CauzziEtAl2014 # BindiEtAl2011 # BindiEtAl2014Rhyp # Bradley2013
+    gm = GroundMotion(params, [0.], [0.], np.array([0.01, 0.2, 0.5, 1.0]))
+    mediansC = dict()
+    stdsC = dict()
+    for i, mag in enumerate(mags):
+        rup = RuptureBuilder.init_surface_from_point(mag, lon, lat, depth,
+                                                     strike, dip, rake)
+        gmf_computer = GmfComputerMod(rupture=rup,
+                                      sitecol=gm.sitecol, 
+                                      cmaker=gm.cmaker)
+        mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
+        for j, SA in enumerate(gm.T_sim):
+            if SA not in mediansC.keys():
+                mediansC[SA] = list()
+            if SA not in stdsC.keys():
+                stdsC[SA] = list()
+            mediansC[SA].append(mean_stds[0,0,j,0])
+            stdsC[SA].append(mean_stds[1,0,j,0])
+
+    
+    from scipy.stats import norm, truncnorm
+    x_axis = np.arange(-7.5, 5, 0.001)
+
+    ind1 = np.where(np.isclose(mags,5.4))[0][0]
+    ind2 = np.where(np.isclose(mags,6.7))[0][0]
+
+    fig, ax = plt.subplots(1,1, figsize=(7.,6.))
+    plt.plot(x_axis, truncnorm.pdf(x_axis,-3,3, mediansB[1.][ind1],stdsB[1.][ind1]), color="r",
+             linestyle="--", label="Bradley SA(1.0) M=5.4")
+    plt.plot(x_axis, truncnorm.pdf(x_axis,-3,3, mediansB[1.][ind2],stdsB[1.][ind2]), color="r",
+             linestyle="--", label="Bradley SA(1.0) M=6.7")
+    plt.xlabel("log(IM)")
+    plt.ylabel("PDF")
+    plt.legend()
+    # plt.xlim([0,4])
+    plt.ylim([0.,0.7])
+    plt.show()
+
+
+    fig, ax = plt.subplots(1,1, figsize=(7.,6.))
+    plt.plot(x_axis, truncnorm.pdf(x_axis,-3,3, mediansC[1.][ind1],stdsC[1.][ind1]), color="b",
+             label="Cauzzi SA(1.0) M=5.4")
+    plt.plot(x_axis, truncnorm.pdf(x_axis,-3,3, mediansC[1.][ind2],stdsC[1.][ind2]), color="b",
+             linestyle="--", label="Cauzzi SA(1.0) M=6.7")
+    plt.xlabel("log(IM)")
+    plt.ylabel("PDF")
+    plt.legend()
+    # plt.xlim([0,4])
+    plt.ylim([0,0.7])
+    plt.show()
+
+
+    from scipy.integrate import simps
+
+    probB = list()
+    probC = list()
+    for j, SA in enumerate(gm.T_sim):
+        y = truncnorm.pdf(x_axis,-3,3, mediansB[SA][ind2],stdsB[SA][ind2]) * \
+                       (1.-norm.cdf(x_axis,mediansB[SA][ind1],stdsB[SA][ind1]))
+        probB.append(simps(y, x_axis))
+        y = truncnorm.pdf(x_axis,-3,3, mediansC[SA][ind2],stdsC[SA][ind2]) * \
+                       (1.-norm.cdf(x_axis,mediansC[SA][ind1],stdsC[SA][ind1]))
+        probC.append(simps(y, x_axis))
+
+
+    fig, axs = plt.subplots(2,1, sharex=True, figsize=(7.,6.))
+    axs[0].plot(gm.T_sim, probB, color="r", label="Bradley")
+    axs[0].plot(gm.T_sim, probC, color="b", label="Cauzzi")
+    axs[0].set_ylabel("Probability gm higher")
+    axs[0].legend()
+    
+    axs[1].plot(gm.T_sim, np.array(probB)/probB[0], 
+                color="r", label="Bradley")
+    axs[1].plot(gm.T_sim, np.array(probC)/probC[0],
+                color="b", label="Cauzzi")
+    axs[1].set_xlabel("Structural period (s)")
+    axs[1].set_ylabel("Relative probability decrease wrt peak")
+    # axs[1].set_xlim(0,1.)
+    # axs[1].set_xscale("log")
+    plt.show()
+
+    s
+
+
+
+
+
+
+    #%% inputs for the rest
 
     # rupture
     rup = RuptureBuilder.init_surface_from_point(mag, lon, lat, depth,
@@ -479,18 +733,22 @@ if __name__ == "__main__":
     # context maker
     gm = GroundMotion(params, lons, lats)
     
-    # gmf computer
-    gmf_computer = GmfComputerMod(rupture=rup,
-                                  sitecol=gm.sitecol, 
-                                  cmaker=gm.cmaker)
-    mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
-
+    # gm = GroundMotion(params, lons, lats, np.array([0.01, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25,
+    #                     0.3,  0.4,  0.5, 0.75, 1.   , 1.5, 2.  , 3. , 4.])) # BindiEtAl2011
+    
+    # gm = GroundMotion(params, lons, lats, np.array([0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25,
+    #                     0.3,  0.4,  0.5, 0.75, 1.   , 1.5, 2.  , 3.])) # BindiEtAl2014Rhyp
+      
 
     #%% mean only
     
     np.random.seed(42)
     num_simulations = 1
     
+    gmf_computer = GmfComputerMod(rupture=rup,
+                                  sitecol=gm.sitecol, 
+                                  cmaker=gm.cmaker)
+    mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
     gmf_computer = GmfComputerMod(rupture=rup,
                                   sitecol=gm.sitecol, 
                                   cmaker=gm.cmaker)
@@ -502,14 +760,22 @@ if __name__ == "__main__":
     xx = lons.reshape((lons_bins.shape[0], lats_bins.shape[0]))
     yy = lats.reshape((lons_bins.shape[0], lats_bins.shape[0]))
     zz = gmf_m[0,:,0].reshape((lons_bins.shape[0], lats_bins.shape[0]))
-    mpe = MapEarthquakes([-1,1,-1,1])
-    con = mpe.ax.contourf(xx, yy, zz, alpha=0.5, cmap="jet")
+  
+    pols = get_polygon_influence(xx.flatten(), yy.flatten())
+
+    mpe = MapEarthquakes()
+    mpe.extent = [-1,1,-1,1]
+    con = mpe.add_colored_polygons(pols, zz.flatten(), cmap="jet",
+                                   linewidth=0.0)
+    cb = mpe.add_colorbar(con, location="right",
+                          label="_st")
+    # con = mpe.ax.contourf(xx, yy, zz, alpha=0.5, cmap="jet")
     # mpe.ax.scatter(lons, lats, s=2, color=[0.5,0.5,0.5], alpha=0.5)
     mpe.ax.scatter(rup.surface.mesh.lons.flatten(),
-                   rup.surface.mesh.lats.flatten(),
-                   s=2, color="r", alpha=0.5)
-    cb = mpe.fig.colorbar(con, orientation="horizontal", label="PGA")
-    mpe.look()
+                    rup.surface.mesh.lats.flatten(),
+                    s=2, color="r", alpha=0.5)
+    # cb = mpe.fig.colorbar(con, orientation="horizontal", label="PGA")
+    mpe.look(lon_step = 0.2, lat_step = 0.2)
     mpe.show()
         
     
@@ -519,12 +785,14 @@ if __name__ == "__main__":
     plt.figure()
     plt.plot(gm.T_sim,rs_m)
     plt.show()
+    
+    
 
 
     #%% no pca
     
     np.random.seed(42)
-    num_simulations = 100
+    num_simulations = 2 # of the same event
     
     gmf_computer = GmfComputerMod(rupture=rup,
                                   sitecol=gm.sitecol, 
@@ -540,11 +808,13 @@ if __name__ == "__main__":
     yy = lats.reshape((lons_bins.shape[0], lats_bins.shape[0]))
     zz = gmf[0,:,0].reshape((lons_bins.shape[0], lats_bins.shape[0]))
     mpe = MapEarthquakes([-1,1,-1,1])
+    mpe.lon_step = 0.2
+    mpe.lat_step = 0.2
     con = mpe.ax.contourf(xx, yy, zz, alpha=0.5, cmap="jet")
     # mpe.ax.scatter(lons, lats, s=2, color=[0.5,0.5,0.5], alpha=0.5)
     mpe.ax.scatter(rup.surface.mesh.lons.flatten(),
-                   rup.surface.mesh.lats.flatten(),
-                   s=2, color="r", alpha=0.5)
+                    rup.surface.mesh.lats.flatten(),
+                    s=2, color="r", alpha=0.5)
     cb = mpe.fig.colorbar(con, orientation="horizontal", label="PGA")
     mpe.look()
     mpe.show()
@@ -561,13 +831,27 @@ if __name__ == "__main__":
     #%% with pca
 
     np.random.seed(42)
-    num_simulations = 100
+    num_simulations = 2 # of the same event
     
     gmf_computer = GmfComputerMod(rupture=rup,
                                   sitecol=gm.sitecol, 
                                   cmaker=gm.cmaker)
+    mean_stds = gm.cmaker.get_mean_stds([gmf_computer.ctx])
     norm_res = gm.get_norm_res(num_simulations)
-    gmf = gmf_computer.compute(params["gsim"], num_simulations, mean_stds, norm_res)
+    
+    ################### this is to apply truncation (#TODO find a better way!)
+    rep = [np.any(norm_res[:,:,i]>gm.oq.truncation_level) or
+           np.any(norm_res[:,:,i]<-gm.oq.truncation_level) 
+           for i in range(0, num_simulations)]
+    while np.any(rep):
+        norm_res2 = gm.get_norm_res(np.sum(rep))
+        norm_res[:,:,rep] = norm_res2
+        rep = [np.any(norm_res[:,:,i]>gm.oq.truncation_level) or
+               np.any(norm_res[:,:,i]<-gm.oq.truncation_level) 
+               for i in range(0, num_simulations)]
+    ############################################## this is to apply truncation
+    
+    gmf_pca = gmf_computer.compute(params["gsim"], num_simulations, mean_stds, norm_res)
     
     # check that over 10000 simulations, the mean is equal to the mean of the GMPE
     # np.testing.assert_allclose(gmf_m[:,:,0], scipy.stats.mstats.gmean(gmf, axis=2))
@@ -575,8 +859,10 @@ if __name__ == "__main__":
     # map
     xx = lons.reshape((lons_bins.shape[0], lats_bins.shape[0]))
     yy = lats.reshape((lons_bins.shape[0], lats_bins.shape[0]))
-    zz = gmf[0,:,0].reshape((lons_bins.shape[0], lats_bins.shape[0]))
+    zz = gmf_pca[0,:,0].reshape((lons_bins.shape[0], lats_bins.shape[0]))
     mpe = MapEarthquakes([-1,1,-1,1])
+    mpe.lon_step = 0.2
+    mpe.lat_step = 0.2
     con = mpe.ax.contourf(xx, yy, zz, alpha=0.5, cmap="jet")
     # mpe.ax.scatter(lons, lats, s=2, color=[0.5,0.5,0.5], alpha=0.5)
     mpe.ax.scatter(rup.surface.mesh.lons.flatten(),
@@ -587,11 +873,11 @@ if __name__ == "__main__":
     mpe.show()
         
     # plot response spectrum for max pga index
-    rs = gmf[:,ind,:]
+    rs = gmf_pca[:,ind,:]
     plt.figure()
     plt.plot(gm.T_sim, rs, color=[0.5,0.5,0.5])
     plt.plot(gm.T_sim, rs_m, color="r")
-    plt.plot(gm.T_sim, gmean(gmf, axis=2)[:,ind])
+    plt.plot(gm.T_sim, gmean(gmf_pca, axis=2)[:,ind])
     plt.show()
 
 
