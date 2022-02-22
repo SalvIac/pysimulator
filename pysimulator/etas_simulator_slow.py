@@ -226,7 +226,6 @@ class EtasSimulator():
         self.seed = 42
         
     
-    
     def _check_inputs(self):
         # if ((self.sim_start is None) and (self.sim_end is not None)) or \
         #    ((self.sim_start is not None) and (self.sim_end is None)):
@@ -245,7 +244,6 @@ class EtasSimulator():
             if key not in keys:
                 return False
         return True
-
 
 
     def _check_params_vs_model(self):
@@ -282,9 +280,6 @@ class EtasSimulator():
             warnings.warn("default incompl_min_mag value used for incompleteness model (incompl_min_mag=6)")
 
 
-
-
-
     @classmethod
     def _model2dict(cls, model):
         modeldict = {"timetrunc": True,
@@ -308,10 +303,6 @@ class EtasSimulator():
         return modeldict
     
     
-    
-    
-    
-    
     def create_output_folder(self, folder):
         if folder is None:
             self.output_folder = os.path.join(os.getcwd())
@@ -319,7 +310,6 @@ class EtasSimulator():
             self.output_folder = os.path.join(os.getcwd(), folder)
         if not os.path.exists(self.output_folder):
             os.makedirs(self.output_folder)
-        
     
     
     def slice2inds(self, slice_inputs=None):
@@ -333,7 +323,6 @@ class EtasSimulator():
             for l in range(0, self.num_realization):
                 inds.append((i, l+self.num_realization*i))
         return inds
-    
     
     
     def _define_inputs(self):
@@ -405,7 +394,6 @@ class EtasSimulator():
                    'seed': self.seed*(ind+1),
                    'filters': filters}
             self.inputs[ind] = dic
-        
     
 
     def simulate(self, slice_inputs=None):
@@ -493,7 +481,6 @@ class EtasSimulator():
         return catalogs
     
     
-    
     def convert2catalogs(self, out, inputs):
         inps = list()
         for j, o in enumerate(out):
@@ -511,7 +498,6 @@ class EtasSimulator():
             for inpu in tqdm(inps):
                 catalogs.append( self.get_custom_catalog(inpu) )
         return catalogs
-
     
     
     @classmethod
@@ -536,8 +522,6 @@ class EtasSimulator():
                 ruptures.append( o["rupture"][i] )
         return CustomCatalog(date_times, ruptures,
                              mainshock=o["isspontaneous"])
-        
-    
     
     
     def get_depth(self, num):
@@ -561,10 +545,8 @@ class EtasSimulator():
             "simulation options: "+str(self.simul_options)+">"
         return string
     
-    
     def __repr__(self):
         return self.__str__()        
-
 
     
     
@@ -588,7 +570,7 @@ class EtasSimulator():
                                                             filters)
             elif background["bkg1"]["type"] == "zhuang":
                 raise Exception("get_background_zhuang not yet complete.")
-                bkgr = EtasSimulator.get_background_zhuang(fit, t, tdt, buffer_region_xy)
+                # bkgr = EtasSimulator.get_background_zhuang(fit, t, tdt, buffer_region_xy)
             gen01 = concat(gen0, bkgr)
         else:
             gen01 = gen0
@@ -634,8 +616,6 @@ class EtasSimulator():
         stoch_catalog = EtasSimulator.filter_events_space(stoch_catalog,
                                                           filters["region"])
         return stoch_catalog
-
-
 
 
 
@@ -727,8 +707,6 @@ class EtasSimulator():
                             for j in range((o["tt"]).shape[0]):
                                 track.append(False)
         return st_cat
-
-    
     
     
     @staticmethod
@@ -763,7 +741,6 @@ class EtasSimulator():
                 filt = (o['tt'] <= t_end)
                 o = filter_dict(o, filt)
         return o
-    
     
     
     @staticmethod
@@ -899,8 +876,6 @@ class EtasSimulator():
         return o
 
     
-    
-
     @staticmethod
     def calc_all_timedep_mc(params, target_tt, prev_events_tt, prev_events_mag):
         '''
@@ -914,7 +889,6 @@ class EtasSimulator():
             mcs.append(EtasSimulator.calc_timedep_mc(params, g, prev_events_tt,
                                                      prev_events_mag))
         return np.array(mcs)
-
     
     
     @staticmethod
@@ -1003,7 +977,6 @@ class EtasSimulator():
         return backg
 
 
-
     @staticmethod
     def integrate_background_gridded(bkg, gen0, params, filters):
         if filters["t_start"] is None or filters["t_end"] is None:
@@ -1037,7 +1010,6 @@ class EtasSimulator():
                                            {'study_start': t_start,
                                             'study_end': t_end})
         return {"bkg1": bkg1, "region_win": region_win, "integ0": integ0}
-
 
 
     @staticmethod
@@ -1097,5 +1069,4 @@ class EtasSimulator():
              "isspontaneous": ["bkg"]*num_events,
              'main_mag_ref': [None]*num_events}
         return o
-
 
