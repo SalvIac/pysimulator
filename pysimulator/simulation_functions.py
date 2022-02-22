@@ -731,10 +731,6 @@ if __name__ == "__main__":
     # ax.legend()
     # plt.show()
     
-    import sys
-    sys.path.append('C:\\Users\\Salvatore\\Dropbox\\SalvIac')
-    from myutils.latex_plot_mode import latex_plot_mode
-    latex_plot_mode()
     
     # check 2d - spatial pdf (effect of gamma)
     fig = plt.figure()
@@ -749,8 +745,7 @@ if __name__ == "__main__":
     ax.set_xlabel("r (deg)")
     ax.set_ylabel(r"$F(r)$")
     ax.legend(loc='lower right')
-    plt.show()    
-    stop
+    plt.show()
     
     
     

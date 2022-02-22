@@ -20,7 +20,7 @@
 import numpy as np
 from tqdm import tqdm 
 from SALib.test_functions import Ishigami
-from myutils.run_multiprocess import run_multiprocess
+from pysimulator.run_multiprocess import run_multiprocess
 
 
 # def fun(*args):

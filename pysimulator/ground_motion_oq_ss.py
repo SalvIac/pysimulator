@@ -36,7 +36,7 @@ from openquake.hazardlib import valid
 from pyrisk.spatial_pca.spatial_pca_residuals import SpatialPcaResiduals
 from pysimulator.ground_motion_container import (GmfGroupContainer,
                                                       GmfCatalogContainer)
-from myutils.run_multiprocess import run_multiprocess
+from pysimulator.run_multiprocess import run_multiprocess
 
 F32 = np.float32
 

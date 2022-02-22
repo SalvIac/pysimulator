@@ -47,7 +47,7 @@ from pysimulator.simulation_functions import (inv_cdf_magnitude_trunc,
                                               compl_vs_time_general)
 from pysimulator.custom_catalog import CustomCatalog
 from pysimulator.rupture_builder import RuptureBuilder
-from myutils.run_multiprocess import run_multiprocess
+from pysimulator.run_multiprocess import run_multiprocess
 
 
 
