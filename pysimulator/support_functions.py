@@ -17,7 +17,9 @@
 
 import random
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib import cm
 plt.ioff()
 from openquake.hazardlib.geo.nodalplane import NodalPlane
 from openquake.hazardlib.pmf import PMF
@@ -414,7 +416,8 @@ def plot_time_etas_single(simulation, mag_threshold, ax=None, show=False):
     ax.plot(res["time_vec"], res["num_events"], color='r', label='One realization')
     ax.set_xlabel('Time (days)')
     ax.set_ylabel('Cumulative number of events M>='+str(mag_threshold))
-    plt.show()
+    if show:
+        plt.show()
     return ax
     
     
@@ -593,15 +596,80 @@ def plot_length_etas_bulk(simulations, mag_threshold, ax=None, show=False):
 
 
 def plot_space_etas_bulk(simulations, mag_threshold, include_basemap_flag=0,
-                         show=False):
-
+                         step=0.5, show=False):
+    max_lons = list()
+    min_lons = list()
+    max_lats = list()
+    min_lats = list()
     for l in range(0, len(simulations)):
         mags = [rup.mag for rup in simulations[l].catalog["rupture"]]
         filt = np.array(mags) > mag_threshold
         bla = simulations[l].filter(filt)
         bla.process_catalog_4etas(mag_threshold,
                                   sim_start=bla.catalog["datetime"][0])
+        max_lons.append(bla.catalog["longitude"].max())
+        min_lons.append(bla.catalog["longitude"].min())
+        max_lats.append(bla.catalog["latitude"].max())
+        min_lats.append(bla.catalog["latitude"].min())
         
+    extent = [np.floor(np.min(min_lons)/step)*step,
+              np.ceil(np.max(max_lons)/step)*step,
+              np.floor(np.min(min_lats)/step)*step,
+              np.ceil(np.max(max_lats)/step)*step]
+    lon_step = step
+    lat_step = step
+    meridians = np.round(np.arange(extent[0], extent[1] + lon_step, lon_step), 2)
+    parallels = np.round(np.arange(extent[2], extent[3] + lat_step, lat_step), 2)
+        
+    xbins = np.arange(extent[0], extent[1]+0.1, 0.1)
+    ybins = np.arange(extent[2], extent[3]+0.1, 0.1)
+    bins = np.zeros((ybins.shape[0]-1, xbins.shape[0]-1))
+    
+    discarted = list()
+    for l in range(0, len(simulations)):
+        mags = [rup.mag for rup in simulations[l].catalog["rupture"]]
+        filt = np.array(mags) >= mag_threshold
+        bla = simulations[l].filter(filt)
+        bla.process_catalog_4etas(mag_threshold)
+        discarted.append(0.)
+        for rup in bla.catalog["rupture"]:
+            lon = rup.hypocenter.longitude
+            lat = rup.hypocenter.latitude
+            if lon > xbins.max() or lon < xbins.min() or \
+               lat > ybins.max() or lat < ybins.min():
+                discarted[l] += 1.
+            else:
+                indx = np.where(lon > xbins)[0][-1]
+                indy = np.where(lat > ybins)[0][-1]
+                bins[indy, indx] += 1.    
+    
+    fig = plt.figure(figsize=(6*1.2, 6))
+    ax = fig.add_subplot()
+    
+    xx, yy = np.meshgrid(xbins[:-1]+0.05, ybins[:-1]+0.05)
+    colormesh = ax.pcolormesh(xx, yy, bins/len(simulations),
+                              cmap=cm.viridis, alpha=0.9,
+                              norm=mpl.colors.LogNorm())
+
+    ax.set_xlabel('$\mathrm{Longitude\ (^\circ)}$') #, labelpad=15)
+    ax.set_ylabel('$\mathrm{Latitude\ (^\circ)}$') #, labelpad=15)
+
+    ax.set_yticks(parallels)
+    ax.set_yticklabels(["$"+str(par)+"$" for par in parallels],
+                            verticalalignment='center', horizontalalignment='right')
+    # ax.set_yticklabels(" ")
+    ax.set_xticks(meridians)
+    ax.set_xticklabels(["$"+str(mer)+"$" for mer in meridians])
+    ax.set_xlim([extent[0]+0.1, extent[1]-0.1])
+    ax.set_ylim([extent[2]+0.1, extent[3]-0.1])
+    
+    cb = plt.colorbar(colormesh,
+                      label='$Rate\ per\ 0.1^\circ\ x\ 0.1^\circ}$')
+    ax.tick_params(axis='both', which='major', pad=7)
+ 
+    if show:
+        plt.show()
+
 
 #     temp = list()
 #     time_vec = np.arange(0., max(maxt), 0.1)
@@ -757,9 +825,6 @@ def plot_space_etas_bulk(simulations, mag_threshold, include_basemap_flag=0,
 
 #     if show:
 #         plt.show()
-
-
-
 
 #         count = forecast.expected_rates.spatial_counts(cartesian=True)
 #         region = forecast.expected_rates.region        

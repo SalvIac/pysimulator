@@ -84,7 +84,7 @@ class EtasSimulator():
     :param simul_options:
     """
     def __init__(self, params, input_catalog, model=None, fault_mode=True,
-                 nodal_planes_distr=[], depth_distr=[], filters={},
+                 nodal_planes_distr=None, depth_distr=None, filters={},
                  simul_options={}):
 
         # etas model
@@ -101,15 +101,26 @@ class EtasSimulator():
             self.mode = "single_event" 
             self.input_catalog = [input_catalog]
         
-        self.nodal_planes_distr = nodal_planes_distr
-        self.depth_distr = depth_distr
+        # nodal planes distribution
+        if nodal_planes_distr is None:
+            warnings.warn("default nodal plane distribution used")
+            self.nodal_planes_distr = get_default_np_distribution()
+        else:
+            self.nodal_planes_distr = nodal_planes_distr
+        # depth distribution
+        if depth_distr is None:
+            warnings.warn("default depth distribution used")
+            self.depth_distr = get_default_depth_distribution()
+        else:
+            self.depth_distr = depth_distr
+        
         self._check_inputs()
         
         # options (set default and override)
         if simul_options is None:
             simul_options = {}
         simul_options.setdefault('num_realization', 1000)
-        simul_options.setdefault('multiprocessing', True)
+        simul_options.setdefault('multiprocessing', False)
         simul_options.setdefault('cores', 3)
         simul_options.setdefault('only_first_generation', False)
         simul_options.setdefault('background', None)
@@ -203,9 +214,6 @@ class EtasSimulator():
             warnings.warn("default incompl_min_mag value used for incompleteness model (incompl_min_mag=6)")
 
 
-
-
-
     @classmethod
     def _model2dict(cls, model):
         modeldict = {"timetrunc": True,
@@ -227,10 +235,6 @@ class EtasSimulator():
                     val = False
                 modeldict[key] = val
         return modeldict
-    
-    
-    
-    
     
     
     def create_output_folder(self, folder):

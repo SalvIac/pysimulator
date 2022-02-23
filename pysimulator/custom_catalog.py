@@ -277,50 +277,50 @@ class CustomCatalog():
     
     
     
-    def simple_plot3d(self):
-        from pyutils.plot3d_rup_simple import PlotRup
-        pr = PlotRup()
-        for e in range(0, self.get_num_events()):
-            pr.plot_xyz(self.catalog["rupture"][e].hypocenter.longitude,
-                        self.catalog["rupture"][e].hypocenter.latitude,
-                        self.catalog["rupture"][e].hypocenter.depth,
-                        s=10, c="r")
-            if self.catalog["rupture"][e].__class__.__name__ != "PointRupture":
-                if self.catalog["rupture"][e].surface.__class__.__name__ == "MultiSurface":
-                    surfaces = self.catalog["rupture"][e].surface.surfaces
-                else:
-                    surfaces = [self.catalog["rupture"][e].surface]
-                for surf in surfaces:
-                    pr.plot_mesh(surf.mesh, s=1, c="b")
-                # # geometry
-                # pr.plot_xyz(cat.catalog["geometry"][e]["lons"],
-                #             cat.catalog["geometry"][e]["lats"],
-                #             np.array(cat.catalog["geometry"][e]["depths"]),
-                #             s=1, c="g")
-        pr.show()
+    # def simple_plot3d(self):
+    #     from pyutils.plot3d_rup_simple import PlotRup
+    #     pr = PlotRup()
+    #     for e in range(0, self.get_num_events()):
+    #         pr.plot_xyz(self.catalog["rupture"][e].hypocenter.longitude,
+    #                     self.catalog["rupture"][e].hypocenter.latitude,
+    #                     self.catalog["rupture"][e].hypocenter.depth,
+    #                     s=10, c="r")
+    #         if self.catalog["rupture"][e].__class__.__name__ != "PointRupture":
+    #             if self.catalog["rupture"][e].surface.__class__.__name__ == "MultiSurface":
+    #                 surfaces = self.catalog["rupture"][e].surface.surfaces
+    #             else:
+    #                 surfaces = [self.catalog["rupture"][e].surface]
+    #             for surf in surfaces:
+    #                 pr.plot_mesh(surf.mesh, s=1, c="b")
+    #             # # geometry
+    #             # pr.plot_xyz(cat.catalog["geometry"][e]["lons"],
+    #             #             cat.catalog["geometry"][e]["lats"],
+    #             #             np.array(cat.catalog["geometry"][e]["depths"]),
+    #             #             s=1, c="g")
+    #     pr.show()
 
 
 
-    def simple_plot2d(self):
-        from pyutils.plot2d_rup_simple import PlotRup
-        pr = PlotRup()
-        for e in range(0, self.get_num_events()):
-            pr.plot_xyz(self.catalog["rupture"][e].hypocenter.longitude,
-                        self.catalog["rupture"][e].hypocenter.latitude,
-                        s=10, c="r")
-            if self.catalog["rupture"][e].__class__.__name__ != "PointRupture":
-                if self.catalog["rupture"][e].surface.__class__.__name__ == "MultiSurface":
-                    surfaces = self.catalog["rupture"][e].surface.surfaces
-                else:
-                    surfaces = [self.catalog["rupture"][e].surface]
-                for surf in surfaces:
-                    pr.plot_mesh(surf.mesh, s=1, c="b")
-                # # geometry
-                # pr.plot_xyz(cat.catalog["geometry"][e]["lons"],
-                #             cat.catalog["geometry"][e]["lats"],
-                #             s=1, c="g")
-        pr.show()
-        return pr.ax
+    # def simple_plot2d(self):
+    #     from pyutils.plot2d_rup_simple import PlotRup
+    #     pr = PlotRup()
+    #     for e in range(0, self.get_num_events()):
+    #         pr.plot_xyz(self.catalog["rupture"][e].hypocenter.longitude,
+    #                     self.catalog["rupture"][e].hypocenter.latitude,
+    #                     s=10, c="r")
+    #         if self.catalog["rupture"][e].__class__.__name__ != "PointRupture":
+    #             if self.catalog["rupture"][e].surface.__class__.__name__ == "MultiSurface":
+    #                 surfaces = self.catalog["rupture"][e].surface.surfaces
+    #             else:
+    #                 surfaces = [self.catalog["rupture"][e].surface]
+    #             for surf in surfaces:
+    #                 pr.plot_mesh(surf.mesh, s=1, c="b")
+    #             # # geometry
+    #             # pr.plot_xyz(cat.catalog["geometry"][e]["lons"],
+    #             #             cat.catalog["geometry"][e]["lats"],
+    #             #             s=1, c="g")
+    #     pr.show()
+    #     return pr.ax
 
 
 

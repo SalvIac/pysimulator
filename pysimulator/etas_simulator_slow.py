@@ -47,8 +47,9 @@ from pysimulator.simulation_functions import (inv_cdf_magnitude_trunc,
                                               compl_vs_time_general)
 from pysimulator.custom_catalog import CustomCatalog
 from pysimulator.rupture_builder import RuptureBuilder
+from pysimulator.support_functions import (get_default_depth_distribution,
+                                           get_default_np_distribution)
 from pysimulator.run_multiprocess import run_multiprocess
-
 
 
 
@@ -163,9 +164,8 @@ class EtasSimulator():
     :param simul_options:
     """
     def __init__(self, params, input_catalog, model=None, fault_mode=True,
-                 nodal_planes_distr=[], depth_distr=[], filters={},
+                 nodal_planes_distr=None, depth_distr=None, filters={},
                  simul_options={}):
-
         # etas model
         self.params = params
         self.model = self._model2dict(model)
@@ -179,16 +179,27 @@ class EtasSimulator():
             # e.g., from mainshock create 1000 simulations of aftershock sequence
             self.mode = "single_event" 
             self.input_catalog = [input_catalog]
-        
-        self.nodal_planes_distr = nodal_planes_distr
-        self.depth_distr = depth_distr
+            
+        # nodal planes distribution
+        if nodal_planes_distr is None:
+            warnings.warn("default nodal plane distribution used")
+            self.nodal_planes_distr = get_default_np_distribution()
+        else:
+            self.nodal_planes_distr = nodal_planes_distr
+        # depth distribution
+        if depth_distr is None:
+            warnings.warn("default depth distribution used")
+            self.depth_distr = get_default_depth_distribution()
+        else:
+            self.depth_distr = depth_distr
+
         self._check_inputs()
         
         # options (set default and override)
         if simul_options is None:
             simul_options = {}
         simul_options.setdefault('num_realization', 1000)
-        simul_options.setdefault('multiprocessing', True)
+        simul_options.setdefault('multiprocessing', False)
         simul_options.setdefault('cores', 3)
         simul_options.setdefault('only_first_generation', False)
         simul_options.setdefault('background', None)
@@ -207,7 +218,6 @@ class EtasSimulator():
         #         print("num_realization imposed!")
         #         self.num_realization = len(self.input_catalog)
         
-            
         # filters on magnitude, region and time
         # (time the only one affecting the simulations, for speed)
         if filters is None:
@@ -300,6 +310,8 @@ class EtasSimulator():
                 elif strval in ["False"]:
                     val = False
                 modeldict[key] = val
+        else:
+            warnings.warn("default ETAS model used (see Iacoletti et al. 2022)")
         return modeldict
     
     
@@ -530,7 +542,7 @@ class EtasSimulator():
     
     def get_nodalplane(self, num):
         return self.nodal_planes_distr.sample(num)
-
+        
 
     def set_seed(self, seed):
         self.seed = seed
