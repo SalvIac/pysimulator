@@ -3,13 +3,7 @@
 @author: Salvatore
 """
 
-import os
 import datetime
-
-import numpy as np
-import pandas as pd
-from shapely.geometry import Point
-
 # from pysimulator.etas_simulator import EtasSimulator
 from pysimulator.etas_simulator_slow import EtasSimulator
 from pysimulator.custom_catalog import CustomCatalog
@@ -21,7 +15,7 @@ from pysimulator.support_functions import (plot_time_etas_single,
 
 
 if __name__ == "__main__":
-
+    
     #%% settings
     # for theory and a few more details see Iacoletti et al. (2022)
     # https://pubs.geoscienceworld.org/ssa/srl/article-abstract/doi/10.1785/0220210134/611678/Validation-of-the-Epidemic-Type-Aftershock?redirectedFrom=fulltext
