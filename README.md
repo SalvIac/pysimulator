@@ -2,7 +2,7 @@
 Simulator package for earthquake catalogs with Epidemic-Type Aftershock Sequence (ETAS) - Salvatore Iacoletti
 
 These codes were used to produce the results published in Iacoletti et al. (2022):
-- pyetas was used to calibrate the ETAS models (https://github.com/SalvIac/pyetas);
+- [pyetas](https://github.com/SalvIac/pyetas) was used to calibrate the ETAS models;
 - pysimulator was used to simulate synthetic catalogs using the calibrated ETAS models.
 
 Please cite:
