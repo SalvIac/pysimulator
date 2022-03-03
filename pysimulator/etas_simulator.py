@@ -868,10 +868,10 @@ class EtasSimulator():
     def get_background_zhuang(fit, t_start, t_end, region_win_xy):
         '''
         Generate the background catalog with the estimated background intensity
-        μ(x,y) (equation 11 in Zhuang et al. 2011)
+        μ(x,y) (equation 11 in Zhuang 2011)
         For each event in the background catalog, generate a random variable Ui 
         uniformly distributed in [0,1], accept it if Ui < ν φi dt/(t−t0), 
-        where ν is as defined in eq (12) Zhuang et al. 2011
+        where ν is as defined in eq (12) Zhuang 2011
         t0 is the starting time of the catalog and t−t0 is the length
         of period of data fitted to the model.
         Randomly assign each selected event a new time uniformly distributed
