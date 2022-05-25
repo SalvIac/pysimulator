@@ -369,7 +369,7 @@ class EtasSimulator():
                                     self.simul_options['background'], _gen0,
                                     self.params, filters)
                 print("background integral:", 
-                      "{:.2f}".format(background["integ0"]), "events per year")
+                      "{:.1f}".format(background["integ0"]), "events")
         
         inds = self.slice2inds()
         for i, ind in tqdm(inds):
