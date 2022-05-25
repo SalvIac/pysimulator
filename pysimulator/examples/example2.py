@@ -4,6 +4,8 @@
 """
 
 import datetime
+import numpy as np
+from pyetas.utils import get_region
 # from pysimulator.etas_simulator import EtasSimulator
 from pysimulator.etas_simulator_slow import EtasSimulator
 from pysimulator.custom_catalog import CustomCatalog
@@ -22,6 +24,7 @@ if __name__ == "__main__":
     
     # other ETAS parameter (values below are examples only)  
     params = {
+            "mu": 1.,
             "alpha": 1.6,
             "A": 0.2,
             "p": 1.2,
@@ -46,8 +49,8 @@ if __name__ == "__main__":
     # 100 realizations, use multiprocessing with 4 cores
     options = {"num_realization": 1000, "multiprocessing": True, "cores": 4}
     
-    # 3-year long simulation
-    days_ahead = 3*365+1
+    # 1-year long simulation
+    days_ahead = 365
 
 
     #%% time window filters
@@ -60,12 +63,44 @@ if __name__ == "__main__":
                "sim_end": sim_end}
     print(filters)
     
+    
+    #%% gridded background seismicity
+
+    # this is a polygon region that filters background events only
+    bkg_region = get_region([-1.,-1.,1.,1.], [-1.,1.,1.,-1.]) # polygon region
+    
+    # define grid between -1deg and 1deg for longitudes and latitudes
+    lonsx = np.arange(-1., 1., .1)+.05 # longitude center bins (e.g., 0.05 is the bin covering range [0,0.1])
+    latsy = np.arange(-1., 1., .1)+.05 # latitude  center bins (e.g., 0.05 is the bin covering range [0,0.1])
+    
+    # gridded background daily rates per unit area [constant 0.1 events/(yr*deg^2)]
+    rated = 0.1 * np.ones((lonsx.shape[0], latsy.shape[0]))
+    
+    # more complex background distribution
+    from scipy.stats import multivariate_normal
+    x, y = np.meshgrid(lonsx, latsy)
+    pos = np.dstack((x, y))
+    rv = multivariate_normal([0.5, 0.5], [[1, 0], [0, 1]]) #multivariate_normal([1.]*20, np.identity(20).tolist())
+    rated = rv.pdf(pos)
+    # import matplotlib.pyplot as plt
+    # fig2 = plt.figure()
+    # ax2 = fig2.add_subplot(111)
+    # ax2.contourf(x, y, rv.pdf(pos))
+    # plt.show()
+    
+    # define input for EtasSimulator
+    bkg = {"type": "gridded",
+            'lon': lonsx, 'lat': latsy,
+            'rated': rated,
+            "bkg_region": bkg_region}
+    options["background"] = bkg
+    
 
     #%% example inputs catalog
-    # magnitude 7. earthquake occurred at sim_start in (lon,lat,depth)=(0,0,10)
+    # magnitude 3. earthquake occurred at sim_start in (lon,lat,depth)=(0,0,10)
 
     prev_datetimes = [sim_start]
-    prev_ruptures = [RuptureBuilder.init_point(mag=7., lon=0., lat=0., depth=10.,
+    prev_ruptures = [RuptureBuilder.init_point(mag=3., lon=0., lat=0., depth=10.,
                                                rake=None, strike=None, dip=None)]
     catalogs_start = CustomCatalog(prev_datetimes, prev_ruptures)
     print(catalogs_start)
@@ -91,5 +126,22 @@ if __name__ == "__main__":
     
     # summary space plot of all realizations
     plot_space_etas_bulk(simulations, mag_threshold=3., show=True)
-       
+      
     
+    #%% same plots only considering background seismicity
+    
+    # filter background events
+    simulations_bkg = [cat.filter([i == "bkg" for i in cat.catalog["mainshock"]]) for cat in simulations]
+    
+    # time plot first realization
+    plot_time_etas_single(simulations_bkg[0], mag_threshold=3.)
+    
+    # simple space plot first realization
+    plot_space_etas_single_1(simulations_bkg[0], mag_threshold=3.)
+    
+    # summary time plot of all realizations
+    plot_time_etas_bulk(simulations_bkg, mag_threshold=3.)
+    
+    # summary space plot of all realizations
+    plot_space_etas_bulk(simulations_bkg, mag_threshold=3., show=True)
+       

@@ -368,7 +368,8 @@ class EtasSimulator():
                 background = EtasSimulator.integrate_background_gridded(
                                     self.simul_options['background'], _gen0,
                                     self.params, filters)
-                print("background integral:", background["integ0"], "events")
+                print("background integral:", 
+                      "{:.2f}".format(background["integ0"]), "events per year")
         
         inds = self.slice2inds()
         for i, ind in tqdm(inds):

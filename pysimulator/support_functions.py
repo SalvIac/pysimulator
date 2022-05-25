@@ -639,14 +639,14 @@ def plot_space_etas_bulk(simulations, mag_threshold, include_basemap_flag=0,
                lat > ybins.max() or lat < ybins.min():
                 discarted[l] += 1.
             else:
-                indx = np.where(lon > xbins)[0][-1]
-                indy = np.where(lat > ybins)[0][-1]
-                bins[indy, indx] += 1.    
+                indx = np.searchsorted(xbins, lon) # indx = np.where(lon > xbins)[0][-1]
+                indy = np.searchsorted(ybins, lat) # indy = np.where(lat > ybins)[0][-1]
+                bins[indy-1, indx-1] += 1.    
     
     fig = plt.figure(figsize=(6*1.2, 6))
     ax = fig.add_subplot()
     
-    xx, yy = np.meshgrid(xbins[:-1]+0.05, ybins[:-1]+0.05)
+    xx, yy = np.meshgrid(xbins, ybins)
     colormesh = ax.pcolormesh(xx, yy, bins/len(simulations),
                               cmap=cm.viridis, alpha=0.9,
                               norm=mpl.colors.LogNorm())
