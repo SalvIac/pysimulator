@@ -66,27 +66,22 @@ if __name__ == "__main__":
     
     #%% gridded background seismicity
 
-    # this is a polygon region that filters background events only
+    # polygon region for background events only
     bkg_region = get_region([-1.,-1.,1.,1.], [-1.,1.,1.,-1.]) # polygon region
     
     # define grid between -1deg and 1deg for longitudes and latitudes
     lonsx = np.arange(-1., 1., .1)+.05 # longitude center bins (e.g., 0.05 is the bin covering range [0,0.1])
     latsy = np.arange(-1., 1., .1)+.05 # latitude  center bins (e.g., 0.05 is the bin covering range [0,0.1])
     
-    # gridded background daily rates per unit area [constant 0.1 events/(yr*deg^2)]
+    # simple gridded background daily rates per unit area [constant 0.1 events/(yr*deg^2)]
     rated = 0.1 * np.ones((lonsx.shape[0], latsy.shape[0]))
     
-    # more complex background distribution
-    from scipy.stats import multivariate_normal
-    x, y = np.meshgrid(lonsx, latsy)
-    pos = np.dstack((x, y))
-    rv = multivariate_normal([0.5, 0.5], [[1, 0], [0, 1]]) #multivariate_normal([1.]*20, np.identity(20).tolist())
-    rated = rv.pdf(pos)
-    # import matplotlib.pyplot as plt
-    # fig2 = plt.figure()
-    # ax2 = fig2.add_subplot(111)
-    # ax2.contourf(x, y, rv.pdf(pos))
-    # plt.show()
+    # # more complex background distribution
+    # from scipy.stats import multivariate_normal
+    # x, y = np.meshgrid(lonsx, latsy)
+    # pos = np.dstack((x, y))
+    # rv = multivariate_normal([0.5, 0.5], [[1, 0], [0, 1]])
+    # rated = rv.pdf(pos)
     
     # define input for EtasSimulator
     bkg = {"type": "gridded",
