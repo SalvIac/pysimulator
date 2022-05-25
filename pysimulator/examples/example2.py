@@ -122,21 +122,3 @@ if __name__ == "__main__":
     # summary space plot of all realizations
     plot_space_etas_bulk(simulations, mag_threshold=3., show=True)
       
-    
-    #%% same plots only considering background seismicity
-    
-    # filter background events
-    simulations_bkg = [cat.filter([i == "bkg" for i in cat.catalog["mainshock"]]) for cat in simulations]
-    
-    # time plot first realization
-    plot_time_etas_single(simulations_bkg[0], mag_threshold=3.)
-    
-    # simple space plot first realization
-    plot_space_etas_single_1(simulations_bkg[0], mag_threshold=3.)
-    
-    # summary time plot of all realizations
-    plot_time_etas_bulk(simulations_bkg, mag_threshold=3.)
-    
-    # summary space plot of all realizations
-    plot_space_etas_bulk(simulations_bkg, mag_threshold=3., show=True)
-       
